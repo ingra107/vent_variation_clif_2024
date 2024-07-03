@@ -56,48 +56,99 @@ The project folder is not within a parent folder that shares its path with `CLIF
 
 ------------------------------------------------------------------------
 
-### Ensure you have set up your site specific qmd file in a folder shared with CLIF-1.0 or a subfolder with a shared parent (see above about folders)
+### Ensure you have set up your site specific qmd file 
+
+**MUST BE** in a folder shared with CLIF-1.0 or a subfolder with a shared parent (see above about folders)
 
 These should be defined in that file. use this format and save as `site_specific_information.qmd`
 
+#### finding `path_cliffed_files`
+1) If you are the only user of these files and data structure.  You can hard code `path_cliffed_files`
+    - this should point to all post-clif-files
+    
+2) If you share R projects on a server.  The base path may differ
+    - Start by finding the first parent folder before your rclif files
+    - use the find_up function to set that as the path
+    - now use here to navigate DOWN that folder structure to find the rclif folder of interest!!
+    
+
 ```{r}
 
-#  I need to find a parent folder first and then code in the rest of the path to my folder
-#  This will help with those that share using the same files
+## Clif Files Path
+
+ # Option 1) 
+ #  where are your clif files stored
+ #  I need to find a parent folder first and then code in the rest of the path to my folder
+ #  This will help with those that share using the same files
 path_cliffed_files_start	<- find_up("CQODE DB Backbone")
 path_cliffed_files_start
 path_cliffed_files <- here(path_cliffed_files_start, "rclif")
 
+ # OPTION 2) 
+    # you can just hard code path_cliffed_files as well
 
+```
+
+#### Setting the other information
+Change these as fits your needs for each project
+```{r}
+## Site
+ # will help with saving tables
 clif_institution <- "umn"
 
-i_ran_qc_script <- "no"
 
+## QC check
+ # change this to yes when you have run the script
+i_ran_qc_script <- "yes"
+
+
+## File type
+ # choose between csv, xls, xlsx, fst, parquet 
+ # all will work (uses readr, fst, arrow packages to choose the command and put the .xyz after the file!)
 file_type	<- "parquet"
 
 ```
 
-Here is the full qmd file that should be used
 
 
-### Find CLIF-1.0
+
+#### Full QMD file of `site_specific_information.qmd`
+- Here is the full qmd file that should be used
+- You can update however you need to 
+
+
 ```{r}
 
 # get path to clif 1.0
 path_clif_1.0 <- find_up("CLIF-1.0")
 
+## Clif Files Path
 
-#  I need to find a parent folder first and then code in the rest of the path to my folder
-#  This will help with those that share using the same files
+ # Option 1) 
+ #  where are your clif files stored
+ #  I need to find a parent folder first and then code in the rest of the path to my folder
+ #  This will help with those that share using the same files
 path_cliffed_files_start	<- find_up("CQODE DB Backbone")
 path_cliffed_files_start
 path_cliffed_files <- here(path_cliffed_files_start, "rclif")
 
+ # OPTION 2) 
+    # you can just hard code path_cliffed_files as well
 
+
+## Site
+ # will help with saving tables
 clif_institution <- "umn"
 
+
+## QC check
+ # change this to yes when you have run the script
 i_ran_qc_script <- "yes"
 
+
+## File type
+ # choose between csv, xls, xlsx, fst, parquet 
+ # all will work (uses readr, fst, arrow packages to choose the command and put the .xyz after the file!)
 file_type	<- "parquet"
 
 
