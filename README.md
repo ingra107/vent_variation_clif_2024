@@ -11,28 +11,31 @@ If you need to change something, please email Nick Ingraham and he will change t
 ### Ensure you have set up your site specific txt file in CLIF-1.0
 
 
-### Create a folder with your fork in the SAME place as CLIF-1.0 OR within a subfolder that shares a location at somepoint in the path with CLIF-1.0
+### Create a folder with your fork
+This must be in the SAME place as CLIF-1.0 OR within a subfolder that shares a location at somepoint in the path with CLIF-1.0
 
+```
 GOOD
 Y:
 ├── Nick
-    ├── CLIF-1.0
+    ├── CLIF-1.0 📁
     ├── other folder
-    └── vent_variation_clif_2024
+    └── vent_variation_clif_2024 📁
 
 GOOD
 Y:
 ├── Nick
-    ├── CLIF-1.0
+    ├── CLIF-1.0 📁
     ├── other folder
     ├── other folder
         ├── other folder
-            └── vent_variation_clif_2024
+            └── vent_variation_clif_2024 📁
 
-BAD
-├── Nick
-    ├── CLIF-1.0
+BAD 
+├── Nick 
+    ├── CLIF-1.0 📁
     ├── other folder
     ├── other folder
 ├── other folder
-    └── vent_variation_clif_2024
+    └── vent_variation_clif_2024 📁
+```
