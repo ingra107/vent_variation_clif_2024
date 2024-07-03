@@ -16,14 +16,6 @@ editor_options:
   chunk_output_type: console
 ---
 # Nick TO DO STILL
-## [x] fix trach
-## [] get rid of UMN Data points 
-## [x] fail safe for lab value
-## [x] fail safe for vital value
-## [x] get patient ID for demographics
-## [x] change var names 
-## [x] location_category
-
 
 ## CLIF Setup
 
@@ -49,9 +41,7 @@ sapply(packages, install_if_missing)
 ### Find CLIF-1.0
 ```{r}
 
-
 ## This will search through all the files in each parent directory and stop when it finds the path to CLIF-1.0 !!!
-
 find_up <- function(file, dir = getwd()) {
   
   if (file %in% list.files(dir)) {
@@ -69,54 +59,12 @@ find_up <- function(file, dir = getwd()) {
   
 }
 
-find_up("CLIF-1.0")
+
+
 
 # get site specific information information
 path_site_info <- find_up("site_specific_information.qmd")
 path_site_info
-
-
-```
-
-```{r}
-#| purl: false
-
-source_rmd <- function(file, local = FALSE, echo = FALSE, ..., purl_opts = list()) {
-  if (!file.exists(file)) {
-    stop("File not found: ", file)
-  }
-  
-  options(knitr.duplicate.label = 'allow')
-
-  # Use a unique temporary file name
-  tempR <- tempfile(tmpdir = ".", fileext = ".R")
-  on.exit(unlink(tempR), add = TRUE)
-
-  tryCatch({
-    knitr::purl(file, output = tempR, ...)
-
-    # Optionally print (echo) the R code
-    if (echo) {
-      cat("R code extracted from", file, ":\n\n")
-      cat(readLines(tempR), sep = "\n")
-      cat("\n\n")
-    }
-  
-    # Source the R code and capture output in a list
-    envir <- if (local) new.env() else globalenv()
-    output <- capture.output(source(tempR, local = envir, ...))
-  
-    return(list(output = output, envir = envir))
-  },
-  error = function(e) {
-    message("Error extracting or sourcing R code from QMD file:")
-    message(e$message)
-  }
-  )
-}
-
-source_rmd(path_site_info, echo = TRUE)
-
 
 
 ```
@@ -157,11 +105,11 @@ create_files <- function(base_path, dir_name) {
 dirs_to_create <- c("temp", "clean_db", "tables", "raw_files", "figures", "output")
 
 # Create the directories
-lapply(dirs_to_create, create_files, base_path = path_clif_vent_variation)
+lapply(dirs_to_create, create_files, base_path = path_current_project)
 
 
 # Print the result for verification
-print(paste("Directories created under:", path_clif_vent_variation))
+print(paste("Directories created under:", path_current_project))
 
 ```
 
@@ -175,57 +123,6 @@ if (i_ran_qc_script == "no") {
   stop("The QC script has not been run. Stopping the script.")
 }
 
-
-```
-
-
-
-### Load in Site Specific Script
-```{r}
-# Load the Parquet file
-site_specific_info <- fread("site_specific_information.csv")
-
-# Extract variables
-clif_institution    <- site_specific_info$clif_institution
-path_clif_files     <- site_specific_info$path_clif_files
-file_type           <- site_specific_info$file_type
-i_ran_qc_script     <- site_specific_info$i_ran_qc_script
-
-
-
-print(clif_institution)
-print(path_clif_files)
-print(file_type)
-print(i_ran_qc_script)
-
-```
-
-
-### [  ] Choose file type
-```{r}
-
-## Variables
- # choose between csv, xls, xlsx, fst, parquet 
- # all will work (uses readr and fst packages to choose the command and put the .xyz after the file!)
-file_type <- "parquet"
-
-```
-
-### [  ] Choose file path
-```{r}
-
-## Clif Files Path
- # where are your clif files stored
-path_clif_files <- "Y:/DataStageData/CQODE DB Backbone/rclif"
-
-```
-
-### [  ] Hospital Name variable
-```{r}
-
-# will help with saving tables
-
-clif_institution <- "umn"
 
 ```
 
