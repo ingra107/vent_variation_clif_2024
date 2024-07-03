@@ -154,7 +154,7 @@ site_specific_info <- data.frame(
 
 )
 
-write_delim(site_specific_info, "site_specific_info.txt")
+write_csv(site_specific_info, "site_specific_info.csv")
 # Save as Parquet
 write_parquet(site_specific_info, "site_specific_information.parquet")
 
