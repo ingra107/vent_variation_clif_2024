@@ -30,15 +30,18 @@ file_format
 
 This must be in the SAME place as CLIF-1.0 OR within a subfolder that shares a location at somepoint in the path with CLIF-1.0
 
+#### Good 😊
+
+The project folder is in the same or a subfolder of the `CLIF-1.0` folder
+
 ```         
-GOOD
 Y:
 ├── Nick
     ├── CLIF-1.0 📁
     ├── other folder
     └── vent_variation_clif_2024 📁
 
-GOOD
+
 Y:
 ├── Nick
     ├── CLIF-1.0 📁
@@ -46,8 +49,13 @@ Y:
     ├── other folder
         ├── other folder
             └── vent_variation_clif_2024 📁
+```
 
-BAD 
+#### Bad 😟
+
+The project folder is not within a parent folder that shares its path with `CLIF-1.0`
+
+```         
 ├── Nick 
     ├── CLIF-1.0 📁
     ├── other folder
