@@ -115,9 +115,9 @@ file_type	<- "parquet"
 #### Full QMD file of `site_specific_information.qmd`
 - Here is the full qmd file that should be used
 - You can update however you need to 
+- **__Make sure below is in a chunk__** 
 
 
-```{r}
 ```{r}
 # get path to clif 1.0
 path_clif_1.0 <- find_up("CLIF-1.0")
@@ -167,5 +167,5 @@ print(file_type)
 print(i_ran_qc_script) 
 print(path_current_project) 
 
-```
+
 ```
