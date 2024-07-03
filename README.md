@@ -79,36 +79,9 @@ file_type	<- "parquet"
 
 Here is the full qmd file that should be used
 
+
 ### Find CLIF-1.0
 ```{r}
-
-
-## This will search through all the files in each parent directory and stop when it finds the path to CLIF-1.0 !!!
-
-find_up <- function(file, dir = getwd()) {
-  
-  if (file %in% list.files(dir, all.files = TRUE)) {
-    return(file.path(dir, file))
-  }
-  
-  split_dirs <- strsplit(dir, "/")[[1]]
-  
-  print(split_dirs)
-  
-  
-  print(list.files(dir, all.files = TRUE))
-  
-  
-  if (length(split_dirs) == 1) {
-    message("No such file exists in directory or parent directories")
-    return(invisible(NULL))
-  }
-  
-  find_up(file, paste(head(split_dirs, -1), collapse = "/"))
-  
-}
-
-
 
 # get path to clif 1.0
 path_clif_1.0 <- find_up("CLIF-1.0")
@@ -123,7 +96,7 @@ path_cliffed_files <- here(path_cliffed_files_start, "rclif")
 
 clif_institution <- "umn"
 
-i_ran_qc_script <- "no"
+i_ran_qc_script <- "yes"
 
 file_type	<- "parquet"
 
