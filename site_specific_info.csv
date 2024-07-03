@@ -1,2 +1,2 @@
 i_ran_qc_script,file_type,path_clif_files,clif_institution
-no,parquet,Y:/DataStageData/CQODE DB Backbone/rclif/,umn
+ yes,parquet,Y:/DataStageData/CQODE DB Backbone/rclif/,umn
