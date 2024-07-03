@@ -12,48 +12,7 @@ Create a fork of this repository, the plan will be to fix things as they arise w
 
 For more information [GIT - CLIF Setup Instructions](https://kaveric.github.io/clif-consortium/posts/github-clif/)
 
-------------------------------------------------------------------------
 
-### Ensure you have set up your site specific txt file in CLIF-1.0
-
-These should be defined in that file. use this format and save as `site_specific_information.txt`
-
-|                  |                                           |           |                 |
-|----------------|---------------------------------|----------|-------------|
-| clif_institution | path_clif_files                           | file_type | i_ran_qc_script |
-| umn              | Y:/DataStageData/CQODE DB Backbone/rclif/ | parquet   | yes             |
-
-
-If needed, use this code one time. All future projects will work off this file which you can update as needed
-
-```{r}
-# Create the data frame
- 
-
-site_specific_info <- data.frame(
-
- ## Site
-  # will help with saving tables
-  clif_institution        = "umn"
-  
- ## Clif Files Path
-  # where are your clif files stored
-  path_clif_files         = "Y:/DataStageData/CQODE DB Backbone/rclif/",
-
- ## File type
-  # choose between csv, xls, xlsx, fst, parquet 
-  # all will work (uses readr, fst, arrow packages to choose the command and put the .xyz after the file!)
-  file_type               = "parquet",
-
- ## QC check
-  # change this to yes when you have run the script
-  i_ran_qc_script         = "no",
-
-)
-
-write_csv(site_specific_info, "site_specific_information.csv")
-
-```
 
 ------------------------------------------------------------------------
 
@@ -93,4 +52,95 @@ The project folder is not within a parent folder that shares its path with `CLIF
     ├── other folder
 ├── other folder
     └── vent_variation_clif_2024 📁
+```
+
+------------------------------------------------------------------------
+
+### Ensure you have set up your site specific qmd file in a folder shared with CLIF-1.0 or a subfolder with a shared parent (see above about folders)
+
+These should be defined in that file. use this format and save as `site_specific_information.qmd`
+
+```{r}
+
+#  I need to find a parent folder first and then code in the rest of the path to my folder
+#  This will help with those that share using the same files
+path_cliffed_files_start	<- find_up("CQODE DB Backbone")
+path_cliffed_files_start
+path_cliffed_files <- here(path_cliffed_files_start, "rclif")
+
+
+clif_institution <- "umn"
+
+i_ran_qc_script <- "no"
+
+file_type	<- "parquet"
+
+```
+
+Here is the full qmd file that should be used
+
+### Find CLIF-1.0
+```{r}
+
+
+## This will search through all the files in each parent directory and stop when it finds the path to CLIF-1.0 !!!
+
+find_up <- function(file, dir = getwd()) {
+  
+  if (file %in% list.files(dir, all.files = TRUE)) {
+    return(file.path(dir, file))
+  }
+  
+  split_dirs <- strsplit(dir, "/")[[1]]
+  
+  print(split_dirs)
+  
+  
+  print(list.files(dir, all.files = TRUE))
+  
+  
+  if (length(split_dirs) == 1) {
+    message("No such file exists in directory or parent directories")
+    return(invisible(NULL))
+  }
+  
+  find_up(file, paste(head(split_dirs, -1), collapse = "/"))
+  
+}
+
+
+
+# get path to clif 1.0
+path_clif_1.0 <- find_up("CLIF-1.0")
+
+
+#  I need to find a parent folder first and then code in the rest of the path to my folder
+#  This will help with those that share using the same files
+path_cliffed_files_start	<- find_up("CQODE DB Backbone")
+path_cliffed_files_start
+path_cliffed_files <- here(path_cliffed_files_start, "rclif")
+
+
+clif_institution <- "umn"
+
+i_ran_qc_script <- "no"
+
+file_type	<- "parquet"
+
+
+# Get the current working directory
+# might help with debugging 
+path_current_project <- here::here()
+
+
+
+
+print(clif_institution)
+print(path_clif_1.0)
+print(path_cliffed_files_start)
+print(path_cliffed_files)
+print(file_type) 
+print(i_ran_qc_script) 
+print(path_current_project) 
+
 ```

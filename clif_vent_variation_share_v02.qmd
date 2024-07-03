@@ -71,29 +71,76 @@ find_up <- function(file, dir = getwd()) {
 
 find_up("CLIF-1.0")
 
-getwd()
-
-# get path
-path_clif_1.0 <- find_up("CLIF-1.0")
-path_clif_1.0
-
-
-# Get the current working directory
-current_dir <- here::here()
-current_dir
-
-# get project path
-path_clif_vent_variation <- find_up("vent_variation_clif_2024")
-path_clif_vent_variation
-
 # get site specific information information
-path_site_info <- find_up("site_specific_information.csv")
+path_site_info <- find_up("site_specific_information.qmd")
 path_site_info
 
 
 ```
 
+```{r}
+#| purl: false
 
+source_rmd <- function(file, local = FALSE, echo = FALSE, ..., purl_opts = list()) {
+  if (!file.exists(file)) {
+    stop("File not found: ", file)
+  }
+  
+  options(knitr.duplicate.label = 'allow')
+
+  # Use a unique temporary file name
+  tempR <- tempfile(tmpdir = ".", fileext = ".R")
+  on.exit(unlink(tempR), add = TRUE)
+
+  tryCatch({
+    knitr::purl(file, output = tempR, ...)
+
+    # Optionally print (echo) the R code
+    if (echo) {
+      cat("R code extracted from", file, ":\n\n")
+      cat(readLines(tempR), sep = "\n")
+      cat("\n\n")
+    }
+  
+    # Source the R code and capture output in a list
+    envir <- if (local) new.env() else globalenv()
+    output <- capture.output(source(tempR, local = envir, ...))
+  
+    return(list(output = output, envir = envir))
+  },
+  error = function(e) {
+    message("Error extracting or sourcing R code from QMD file:")
+    message(e$message)
+  }
+  )
+}
+
+source_rmd(path_site_info, echo = TRUE)
+
+
+
+```
+
+# Running site file
+```{r}
+#| purl: false
+
+source_rmd <- function(file, local = FALSE, ...){
+  options(knitr.duplicate.label = 'allow')
+
+  tempR <- tempfile(tmpdir = ".", fileext = ".R")
+  on.exit(unlink(tempR))
+  knitr::purl(file, output=tempR)
+
+  envir <- globalenv()
+  source(tempR, local = envir, ...)
+}
+
+source_rmd(path_site_info, echo = TRUE)
+
+
+
+```
 
 
 ### Make Folders
