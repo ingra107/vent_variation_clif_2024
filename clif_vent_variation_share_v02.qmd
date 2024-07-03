@@ -82,9 +82,14 @@ path_clif_1.0
 current_dir <- here::here()
 current_dir
 
-
+# get project path
 path_clif_vent_variation <- find_up("vent_variation_clif_2024")
 path_clif_vent_variation
+
+# get site specific information information
+path_site_info <- find_up("site_specific_information.csv")
+path_site_info
+
 
 ```
 
@@ -128,54 +133,23 @@ if (i_ran_qc_script == "no") {
 
 
 
-```{r}
-# Create the data frame
- 
-
-site_specific_info <- data.frame(
- ## QC check
-  # change this to yes when you have run the script
-  i_ran_qc_script         = "no",
-
- ## File type
-  # choose between csv, xls, xlsx, fst, parquet 
-  # all will work (uses readr, fst, arrow packages to choose the command and put the .xyz after the file!)
-  file_type               = "parquet",
-  
-  
- ## Clif Files Path
-  # where are your clif files stored
-  path_clif_files         = "Y:/DataStageData/CQODE DB Backbone/rclif/",
- 
-
- ## Site
-  # will help with saving tables
-  clif_institution        = "umn"
-
-)
-
-write_xlsx(site_specific_info, "site_specific_info.xlsx")
-# Save as Parquet
-write_parquet(site_specific_info, "site_specific_information.parquet")
-
-```
-
-
 ### Load in Site Specific Script
 ```{r}
 # Load the Parquet file
-site_specific_info <- read_parquet("site_specific_information.parquet")
+site_specific_info <- fread("site_specific_information.csv")
 
 # Extract variables
-file_type           <- site_specific_info$file_type
-path_clif_files     <- site_specific_info$path_clif_files
 clif_institution    <- site_specific_info$clif_institution
+path_clif_files     <- site_specific_info$path_clif_files
+file_type           <- site_specific_info$file_type
+i_ran_qc_script     <- site_specific_info$i_ran_qc_script
 
 
 
-print(file_type)
-print(path_clif_files)
 print(clif_institution)
+print(path_clif_files)
+print(file_type)
+print(i_ran_qc_script)
 
 ```
 

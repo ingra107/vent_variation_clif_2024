@@ -16,13 +16,44 @@ For more information [GIT - CLIF Setup Instructions](https://kaveric.github.io/c
 
 ### Ensure you have set up your site specific txt file in CLIF-1.0
 
-These should be defined in that file
+These should be defined in that file. use this format and save as `site_specific_information.txt`
 
-site
+|                  |                                           |           |                 |
+|----------------|---------------------------------|----------|-------------|
+| clif_institution | path_clif_files                           | file_type | i_ran_qc_script |
+| umn              | Y:/DataStageData/CQODE DB Backbone/rclif/ | parquet   | yes             |
 
-cliffed_file_path
 
-file_format
+If needed, use this code one time. All future projects will work off this file which you can update as needed
+
+```{r}
+# Create the data frame
+ 
+
+site_specific_info <- data.frame(
+
+ ## Site
+  # will help with saving tables
+  clif_institution        = "umn"
+  
+ ## Clif Files Path
+  # where are your clif files stored
+  path_clif_files         = "Y:/DataStageData/CQODE DB Backbone/rclif/",
+
+ ## File type
+  # choose between csv, xls, xlsx, fst, parquet 
+  # all will work (uses readr, fst, arrow packages to choose the command and put the .xyz after the file!)
+  file_type               = "parquet",
+
+ ## QC check
+  # change this to yes when you have run the script
+  i_ran_qc_script         = "no",
+
+)
+
+write_csv(site_specific_info, "site_specific_information.csv")
+
+```
 
 ------------------------------------------------------------------------
 
