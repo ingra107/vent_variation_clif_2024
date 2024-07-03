@@ -73,39 +73,27 @@ find_up("CLIF-1.0")
 
 getwd()
 
-clif_path <- find_up("CLIF-1.0")
-
-clif_path
-
-```
-
-
-```
-
-
-### Make Folders
-```{r}
+# get path
+path_clif_1.0 <- find_up("CLIF-1.0")
+path_clif_1.0
 
 
 # Get the current working directory
 current_dir <- here::here()
 current_dir
 
-# Check if the working directory ends with "CLIF 1.0" or "vent_variation"
-if (grepl("CLIF-1.0$", current_dir)) {
-  path_clif_vent_variation <- here("projects", "vent_variation")
-  
-  # if you are doing things in the vent_variation folder you can just stay there
-} else if (grepl("vent_variation$", current_dir)) {
-  path_clif_vent_variation <- ""
-  
-  # if you are doing things in a folder outside of git_hub, we will just make this your path
-} else {
-  path_clif_vent_variation <- ""  
-}
 
-# Print the result
-print(path_clif_vent_variation)
+path_clif_vent_variation <- find_up("vent_variation_clif_2024")
+path_clif_vent_variation
+
+```
+
+
+
+
+### Make Folders
+```{r}
+
 
 # Function to create directories
 create_files <- function(base_path, dir_name) {
@@ -128,8 +116,7 @@ print(paste("Directories created under:", path_clif_vent_variation))
 ### [  ] Have you run the QC resp support script
 ```{r}
 
-# change this to yes when you have run the script
-i_ran_qc_script <- "no"
+
 
 # Check the value of the variable
 if (i_ran_qc_script == "no") {
@@ -142,57 +129,32 @@ if (i_ran_qc_script == "no") {
 
 
 ```{r}
-# Get the full path of the current working directory
-current_path <- getwd()
-
-# Split the path into its components
-path_components <- unlist(strsplit(current_path, "/"))
-
-# Determine how many levels to go up (2 in your case)
-levels_up <- 2
-
-# Remove the last 'levels_up' components from the path
-parent_path <- paste(path_components[1:(length(path_components) - levels_up)], collapse = "/")
-
-# Add the sibling folder name
-sibling_folder_path <- file.path(parent_path, "CLIF-1.0", "mCIDE")
-
-# Define the file name within the sibling folder
-file_name <- "clif_vocab_labs.csv"
-
-# Access the target file
-target_file_path <- file.path(sibling_folder_path, file_name)
-
-# Now read the file
-read_csv(target_file_path)
-
-
-
 # Create the data frame
+ 
+
 site_specific_info <- data.frame(
-  
-## File type
- # choose between csv, xls, xlsx, fst, parquet 
- # all will work (uses readr, fst, arrow packages to choose the command and put the .xyz after the file!)
+ ## QC check
+  # change this to yes when you have run the script
+  i_ran_qc_script         = "no",
+
+ ## File type
+  # choose between csv, xls, xlsx, fst, parquet 
+  # all will work (uses readr, fst, arrow packages to choose the command and put the .xyz after the file!)
   file_type               = "parquet",
+  
   
  ## Clif Files Path
   # where are your clif files stored
   path_clif_files         = "Y:/DataStageData/CQODE DB Backbone/rclif/",
  
- ## CLif 1.0 path
-  path_clif_1.0           = "Y:/DataStageData/Nick/CLIF/CLIF-1.0",
- 
- ## Project Path
-  # Where is your current directory for this project that  you want to work in
-  path_vent_variation     = "Y:/DataStageData/Nick/CLIF/CLIF-1.0/projects/vent_variation/",
- 
-## Site
- # will help with saving tables
+
+ ## Site
+  # will help with saving tables
   clif_institution        = "umn"
 
 )
 
+write_delim(site_specific_info, "site_specific_info.txt")
 # Save as Parquet
 write_parquet(site_specific_info, "site_specific_information.parquet")
 
@@ -208,6 +170,7 @@ site_specific_info <- read_parquet("site_specific_information.parquet")
 file_type           <- site_specific_info$file_type
 path_clif_files     <- site_specific_info$path_clif_files
 clif_institution    <- site_specific_info$clif_institution
+
 
 
 print(file_type)
