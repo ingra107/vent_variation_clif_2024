@@ -15,16 +15,18 @@ editor: source
 editor_options: 
   chunk_output_type: console
 ---
+
 # Nick TO DO STILL
 
 ## CLIF Setup
 
 ### Libraries
+
 ```{r}
 #| label: installing packages
 #| timeit: true
 
-packages <- c("tidyverse","ggthemes","styler","readxl","writexl","DBI","dbplyr","knitr","pandoc","janitor", "data.table", "duckdb","powerjoin","collapse","tidyfast","datapasta","fst","dtplyr","bit64","zoo","fuzzyjoin","arrow","hrbrthemes","here")
+packages <- c("tidyverse","ggthemes","styler","readxl","writexl","DBI","dbplyr","knitr","pandoc","janitor", "data.table", "duckdb","powerjoin","collapse","tidyfast","datapasta","fst","dtplyr","bit64","zoo","fuzzyjoin","arrow","hrbrthemes","here","table1", "rvest", "tidymodels", "pscl")
 
 install_if_missing <- function(package) {
   if (!require(package, character.only = TRUE)) {
@@ -39,6 +41,7 @@ sapply(packages, install_if_missing)
 
 
 ### Find CLIF-1.0
+
 ```{r}
 
 ## This will search through all the files in each parent directory and stop when it finds the path to CLIF-1.0 !!!
@@ -70,6 +73,7 @@ path_site_info
 ```
 
 # Running site file
+
 ```{r}
 #| purl: false
 
@@ -92,6 +96,7 @@ source_rmd(path_site_info, echo = TRUE)
 
 
 ### Make Folders
+
 ```{r}
 
 
@@ -113,7 +118,9 @@ print(paste("Directories created under:", path_current_project))
 
 ```
 
+
 ### [  ] Have you run the QC resp support script
+
 ```{r}
 
 
@@ -129,9 +136,11 @@ if (i_ran_qc_script == "no") {
 
 
 ### Functions
+
 ```{r}
 #| label: Functions
 #| timeit: true
+
 
 # Quickly look at the data like we would in stata, default is 100
 ni_peek <- function(x, n=100){
@@ -201,26 +210,59 @@ vitalwarning <- function() {
 }
 
 
+
+read_data <- function(file_path) {
+  file_path_temp <- paste0(path_cliffed_files,"/", file_path, ".", file_type)
+  print(file_path_temp)
+  
+  if (grepl("\\.csv$", file_path_temp)) {
+    return(read.csv(file_path_temp))
+  } else if (grepl("\\.parquet$", file_path_temp)) {
+    return(arrow::read_parquet(file_path_temp))
+  } else if (grepl("\\.fst$", file_path_temp)) {
+    return(fst::read.fst(file_path_temp))
+  } else {
+    stop("Unsupported file format")
+  }
+}
+
   
 ```
 
 ## Import
 
 ### Cohort identification
+
 ```{r}
+
 #~~~~~~~~~~
 # ID cohort
-# ~~~~~~~~~
+#~~~~~~~~~
 
 # Main Respiratory Support Table
-    #~~ using readr or fst package depending on the file type. (THESE WERE SET DURING SET UP ^^ )
-clif_resp_support <- get(paste0("read_", file_type))(paste0(path_clif_files, "clif_respiratory_support", ".", file_type))
+    #~~ using readr or fst or arrow (parquet) package depending on the file type. (THESE WERE SET DURING SET UP ^^ )
+clif_respiratory_support_start <- read_data("clif_respiratory_support") |> select(encounter_id, device_category, tracheostomy)
+clif_limited_identifiers_start <- read_data("clif_limited_identifiers") |> select(encounter_id, admission_dttm)
+clif_encounter_demographics_dispo_start <- read_data("clif_encounter_demographics_dispo") |> select(encounter_id, age_at_admission)
 
 
 # getting a keep_list of encounter_ids that have vent or trach during their encounter... we will use this right_join the dfs below
-df_cohort_keep <- clif_resp_support |> 
-  mutate(across(where(is_character), tolower)) |>
-  filter(device_category == "vent" | tracheostomy == 1) |> 
+df_cohort_keep <- clif_respiratory_support_start |> 
+  
+  # Just getting those ventilated or trach
+  filter(str_to_lower(device_category) == "vent" | tracheostomy == 1) |> 
+  
+  # getting age at admission
+  left_join(clif_encounter_demographics_dispo_start) |> 
+  
+  # Exclusion based on date
+  left_join(clif_limited_identifiers_start) |>
+  filter(
+    lubridate::year(admission_dttm) >= 2020 | encounter_id == 1767475 | encounter_id == 2044432,
+    lubridate::year(admission_dttm) <= 2021,
+    age_at_admission >= 18,
+    !is.na(age_at_admission)
+    ) |>  
   select(encounter_id) |> 
   distinct()
 
@@ -228,12 +270,15 @@ df_cohort_keep <- clif_resp_support |>
 # Function for importing files easily just with the file of the clif_table
 import_df <- function(x) {
   # Construct the file path
-  file_path <- paste0(path_clif_files, x, ".", file_type)
+  file_path <- paste0(path_cliffed_files,"/", x, ".", file_type)
   
   # Dynamically call the appropriate read function based on file_type
-  read_function <- get(paste0("read_", file_type))
+  read_function <- get(paste0("read_", file_type)) 
   
   df <- read_function(file_path) |>
+    
+    # right join early so files are smaller
+    right_join(df_cohort_keep) |> 
     
     # unfactor things to ensure everything is lowercase
     mutate(across(where(is.factor), as.character)) |> 
@@ -241,12 +286,15 @@ import_df <- function(x) {
     # get everything to lower
     mutate(across(where(is_character), tolower)) 
   
-    # Find all datetime variables containing 'dttm'
+  
+  
+  # Find all datetime variables containing 'dttm'
   datetime_vars <- names(df)[grepl("dttm", names(df))]
   
   # Check and convert datetime variables
   for (var in datetime_vars) {
     if (!inherits(df[[var]], "POSIXct")) {
+      
       # Attempt to parse datetime using a common format, adjust based on your actual format
       df[[var]] <- mdy_hms(df[[var]], quiet = TRUE)
       
@@ -281,13 +329,16 @@ import_df <- function(x) {
 
 
 ### Other imports / check variable alignment
+
 ```{r}
+
 #~~~~~~~~~~
 # Import data and cohort tables
 #~~~~~~~~~~
 
+
 # Resp support table cohort
-clif_resp_support <- import_df("clif_respiratory_support") |> 
+clif_respiratory_support <- import_df("clif_respiratory_support") |> 
       # Check if Variables match!!
       # You will get an error if you do not have all the relevant variables needed
       select(
@@ -297,15 +348,20 @@ clif_resp_support <- import_df("clif_respiratory_support") |>
         device_category,
         mode_name,
         mode_category,
-        fio2,
-        peep,
-        set_volume,
-        pressure_support,
-        set_resp_rate,
-        exhaled_volume,
-        pressure_inspiratory,
-        pressure_plateau,
-        minute_vent,
+        fio2_set,
+        tidal_volume_set,
+        resp_rate_set,
+        pressure_control_set, # not used
+        pressure_support_set,
+        flow_rate_set,  # not used
+        # peak_inspiratory_pressure_set, # not used and only in infants
+        inspiratory_time_set, # not used
+        peep_set,
+        tidal_volume_obs,
+        plateau_pressure_obs,
+        peak_inspiratory_pressure_obs,
+        # peep_obs, # not used and not in adult set 
+        minute_vent_obs,
         tracheostomy)
 
 
@@ -332,10 +388,20 @@ clif_vitals <- import_df("clif_vitals") |>
         meas_site_name)
 
 
+# GCS for lap2
+clif_gcs <- import_df("clif_gcs") |> 
+      # Check if Variables match!!
+      select(
+        encounter_id,
+        recorded_dttm,
+        gcs_eye,
+        gcs_verbal,
+        gcs_motor,
+        gcs_total
+        )
+
 # Labs to merge with patient so we can get spo2 and such information
 clif_labs <- import_df("clif_labs") |> 
-  filter(lab_category %in% c("pao2",
-                             "sao2")) |> 
       # Check if Variables match!!
       select(
         encounter_id,
@@ -360,17 +426,29 @@ clif_patient_demographics <- import_df("clif_patient_demographics") |>
 
 
 # Encounter Information 
-clif_encounter_demographic_dispo <- import_df("clif_encounter_demographic_dispo") |> 
+clif_encounter_demographics_dispo <- import_df("clif_encounter_demographics_dispo") |> 
       # Check if Variables match!!
       select(encounter_id,
-             disposition,
+             # admission_category, # don't have this yet in CLIF
+             disposition_category,
+             disposition_name,
              age_at_admission)
+
+
+
+# Encounter Information 
+clif_limited_identifiers <- import_df("clif_limited_identifiers") |>
+      # Check if Variables match!!
+      select(encounter_id,
+             admission_dttm,
+             discharge_dttm)
 
 
 
 # combining them to one df
 clif_demographics_combined <- clif_patient_demographics |> 
-  left_join(clif_encounter_demographic_dispo)
+  left_join(clif_encounter_demographics_dispo) |> 
+  left_join(clif_limited_identifiers)
 
 
 
@@ -384,16 +462,19 @@ clif_demographics_combined <- clif_patient_demographics |>
 
 ```
 
+
 # Import QA checks
+
 ```{r}
-# Check fio2
-fio2_mean <- mean(clif_resp_support$fio2, na.rm = TRUE) 
+
+# Check fio2_set
+fio2_mean <- mean(clif_respiratory_support$fio2_set, na.rm = TRUE) 
 
 # fixing if its less than one
 # You will get a warning but it will be fixed on its own with IF statement
 if(fio2_mean < 1){ 
   fio2warning()
-  clif_resp_support <- clif_resp_support |> mutate(fio2 = fio2 * 100)
+  clif_respiratory_support <- clif_respiratory_support |> mutate(fio2_set = fio2_set * 100)
   }
 
 
@@ -418,8 +499,11 @@ if(is.character(clif_vitals$vital_value)){
 # Cleaning Data
 
 ## Hourly Sequence
+
 ```{r}
 #| label: cleaning up vent data
+
+
 #~~~~~~~~~~~~~~~~
 ##~~ getting an hour sequence so we can fill in the gaps
 #~~~~~~~~~~~~~~~~
@@ -430,7 +514,7 @@ if(is.character(clif_vitals$vital_value)){
 # 
 
 hour_sequence <- 
-  clif_resp_support |> 
+  clif_respiratory_support |> 
   group_by(encounter_id)  |> 
   reframe(recorded_dttm = seq(fmin(recorded_dttm), fmax(recorded_dttm), by = "1 hour")) |> 
   
@@ -445,6 +529,7 @@ hour_sequence <-
 
 
 ## Quality Check & Clean + Waterfall
+
 ```{r}
 
 ni_tic()
@@ -452,45 +537,45 @@ ni_tic()
 ##~~ Quick QA and fixing missing values throughout
 #~~~~~~~~~~~~~~~~
 
-df_resp_support  <- clif_resp_support |> 
+df_resp_support  <- clif_respiratory_support |> 
   select(encounter_id, recorded_dttm, device_category, device_name, mode_category, mode_name, 
-         fio2, set_volume, peep,  pressure_support, set_resp_rate, tracheostomy, 
-         exhaled_volume, pressure_inspiratory, minute_vent, pressure_plateau 
+         fio2_set, tidal_volume_set, peep_set,  pressure_support_set, resp_rate_set, tracheostomy, 
+         tidal_volume_obs, peak_inspiratory_pressure_obs, minute_vent_obs, plateau_pressure_obs 
   ) |>
   
   # filter is recorded_dttm missing
   mutate(
-    # fio2
-    fio2 = fifelse(fio2 > 100, NA_real_, fio2),
-    fio2 = fifelse(fio2 <  21, NA_real_, fio2),
+    # fio2_set
+    fio2_set = fifelse(fio2_set > 100, NA_real_, fio2_set),
+    fio2_set = fifelse(fio2_set <  21, NA_real_, fio2_set),
     
-    # Set set_volume
-    set_volume = fifelse(set_volume > 2500, NA_real_, set_volume),
-    set_volume = fifelse(set_volume <   50, NA_real_, set_volume),
+    # Set tidal_volume_set
+    tidal_volume_set = fifelse(tidal_volume_set > 2500, NA_real_, tidal_volume_set),
+    tidal_volume_set = fifelse(tidal_volume_set <   50, NA_real_, tidal_volume_set),
     
-    # peep
-    peep = fifelse(peep > 30, NA_real_, peep),
-    peep = fifelse(peep <  0, NA_real_, peep),
+    # peep_set
+    peep_set = fifelse(peep_set > 30, NA_real_, peep_set),
+    peep_set = fifelse(peep_set <  0, NA_real_, peep_set),
     
-    # pressure_support (sometimes APRV may be in here ... so limit ~ 50??)
-    pressure_support = fifelse(pressure_support > 50, NA_real_, pressure_support),
-    pressure_support = fifelse(pressure_support <  0, NA_real_, pressure_support),
+    # pressure_support_set (sometimes APRV may be in here ... so limit ~ 50??)
+    pressure_support_set = fifelse(pressure_support_set > 50, NA_real_, pressure_support_set),
+    pressure_support_set = fifelse(pressure_support_set <  0, NA_real_, pressure_support_set),
     
-    # set_resp_rate
-    set_resp_rate = fifelse(set_resp_rate > 60, NA_real_, set_resp_rate),
-    set_resp_rate = fifelse(set_resp_rate <  0, NA_real_, set_resp_rate),
+    # resp_rate_set
+    resp_rate_set = fifelse(resp_rate_set > 60, NA_real_, resp_rate_set),
+    resp_rate_set = fifelse(resp_rate_set <  0, NA_real_, resp_rate_set),
     
-    # exhaled_volume
-    exhaled_volume = fifelse(exhaled_volume > 2500, NA_real_, exhaled_volume),
-    exhaled_volume = fifelse(exhaled_volume <    0, NA_real_, exhaled_volume),
+    # tidal_volume_obs
+    tidal_volume_obs = fifelse(tidal_volume_obs > 2500, NA_real_, tidal_volume_obs),
+    tidal_volume_obs = fifelse(tidal_volume_obs <    0, NA_real_, tidal_volume_obs),
     
-    # pressure_inspiratory
-    pressure_inspiratory = fifelse(pressure_inspiratory > 60, NA_real_, pressure_inspiratory),
-    pressure_inspiratory = fifelse(pressure_inspiratory <  0, NA_real_, pressure_inspiratory),
+    # peak_inspiratory_pressure_obs
+    peak_inspiratory_pressure_obs = fifelse(peak_inspiratory_pressure_obs > 60, NA_real_, peak_inspiratory_pressure_obs),
+    peak_inspiratory_pressure_obs = fifelse(peak_inspiratory_pressure_obs <  0, NA_real_, peak_inspiratory_pressure_obs),
     
-    # minute_vent
-    minute_vent = fifelse(minute_vent > 30, NA_real_, minute_vent),
-    minute_vent = fifelse(minute_vent <  0, NA_real_, minute_vent),
+    # minute_vent_obs
+    minute_vent_obs = fifelse(minute_vent_obs > 30, NA_real_, minute_vent_obs),
+    minute_vent_obs = fifelse(minute_vent_obs <  0, NA_real_, minute_vent_obs),
     
     ) |>
   
@@ -507,6 +592,16 @@ df_resp_support  <- clif_resp_support |>
 
   # order for filling things in
   arrange(encounter_id, recorded_dttm) |> 
+  
+  # Fixing when: ventilator is the device_name and will make consisent with mechanical ventilator (added 7/2024)
+  mutate(
+    device_name = 
+      fifelse(
+        device_name == "ventilator",
+        "mechanical ventilator",
+        device_name
+      )
+  ) |> 
   
   # Fixing when: the mode and category are there with device_name and device_cat not filled in.  fixing with the below
   mutate(
@@ -530,41 +625,41 @@ df_resp_support  <- clif_resp_support |>
   #     If device before is VENT + normal vent things ... its VENT too 
   mutate(device_category = fifelse(is.na(device_category) & 
                                      lag(device_category == "vent") & 
-                                     set_volume > 1 & 
-                                     set_resp_rate > 1 & 
-                                     peep > 1, 
+                                     tidal_volume_set > 1 & 
+                                     resp_rate_set > 1 & 
+                                     peep_set > 1, 
                                    "vent", 
                                    device_category)) |>
   
   #     If device after is VENT + normal vent things ... its VENT too 
   mutate(device_category = fifelse(is.na(device_category) & 
                                      lead(device_category == "vent") & 
-                                     set_volume > 1 & 
-                                     set_resp_rate > 1 & 
-                                     peep > 1, 
+                                     tidal_volume_set > 1 & 
+                                     resp_rate_set > 1 & 
+                                     peep_set > 1, 
                                    "vent", 
                                    device_category)) |> 
   
   # same as above for device_name ^^^^^^^^^^^
-  mutate(device_name = fifelse(is.na(device_name) & lag(device_name == "mechanical ventilation") & set_volume > 1 & set_resp_rate > 1 & peep > 1, "mechanical ventilation", device_name)) |> 
+  mutate(device_name = fifelse(is.na(device_name) & lag(device_name == "mechanical ventilation") & tidal_volume_set > 1 & resp_rate_set > 1 & peep_set > 1, "mechanical ventilation", device_name)) |> 
   
-  mutate(device_name = fifelse(is.na(device_name) & lead(device_name == "mechanical ventilation") & set_volume > 1 & set_resp_rate > 1 & peep > 1, "mechanical ventilation", device_name)) |>
+  mutate(device_name = fifelse(is.na(device_name) & lead(device_name == "mechanical ventilation") & tidal_volume_set > 1 & resp_rate_set > 1 & peep_set > 1, "mechanical ventilation", device_name)) |>
   
   
   # doing this for BiPAP as well 
   mutate(device_category = fifelse(is.na(device_category) & 
                                      lag(device_category == "nippv") & 
-                                     minute_vent > 1 & 
-                                     pressure_inspiratory > 1 & 
-                                     pressure_support > 1, 
+                                     minute_vent_obs > 1 & 
+                                     peak_inspiratory_pressure_obs > 1 & 
+                                     pressure_support_set > 1, 
                                    "nippv", 
                                    device_category)) |>
   
   mutate(device_category = fifelse(is.na(device_category) & 
                                      lead(device_category == "nippv") & 
-                                     minute_vent > 1 & 
-                                     pressure_inspiratory > 1 & 
-                                     pressure_support > 1, 
+                                     minute_vent_obs > 1 & 
+                                     peak_inspiratory_pressure_obs > 1 & 
+                                     pressure_support_set > 1, 
                                    "nippv", 
                                    device_category)) |>
   
@@ -579,8 +674,8 @@ df_resp_support  <- clif_resp_support |>
       fifelse(
         is.na(device_category) & 
           !str_detect(device_name, "trach") &
-          set_volume > 0 & 
-          set_resp_rate > 0,
+          tidal_volume_set > 0 & 
+          resp_rate_set > 0,
         "vent",
         device_category
       ), 
@@ -588,8 +683,8 @@ df_resp_support  <- clif_resp_support |>
       fifelse(
         is.na(device_name) & 
           !str_detect(device_name, "trach") &
-          set_volume > 0 & 
-          set_resp_rate > 0,
+          tidal_volume_set > 0 & 
+          resp_rate_set > 0,
         "mechanical ventilator",
         device_name
       ),    
@@ -597,8 +692,8 @@ df_resp_support  <- clif_resp_support |>
       fifelse(
         is.na(mode_category) & 
           !str_detect(device_name, "trach") &
-          set_volume > 0 & 
-          set_resp_rate > 0,
+          tidal_volume_set > 0 & 
+          resp_rate_set > 0,
         "assist control-volume control",
         mode_category
       ),
@@ -606,8 +701,8 @@ df_resp_support  <- clif_resp_support |>
       fifelse(
         is.na(mode_name) & 
           !str_detect(device_name, "trach") &
-          set_volume > 0 & 
-          set_resp_rate > 0,
+          tidal_volume_set > 0 & 
+          resp_rate_set > 0,
         "cmv/ac",
         mode_name)
   ) |> 
@@ -641,8 +736,8 @@ df_resp_support  <- clif_resp_support |>
         is.na(device_name) &
         is.na(mode_category) &
         is.na(mode_name) & 
-        is.na(fio2) &        # keeps informative fio2 data around
-        is.na(set_volume)    # keeps vent data around... this happens sort of often
+        is.na(fio2_set) &        # keeps informative fio2_set data around
+        is.na(tidal_volume_set)    # keeps vent data around... this happens sort of often
       )) |> 
     
     
@@ -742,15 +837,15 @@ df_resp_support  <- clif_resp_support |>
   relocate(mode_name_id, .after = recorded_hour) |> 
   
   
-  # changing fio2 to 0.21 if room air as category
-  mutate(fio2 = if_else(is.na(fio2) & device_category == "room air", 21, fio2)) |> 
+  # changing fio2_set to 0.21 if room air as category
+  mutate(fio2_set = if_else(is.na(fio2_set) & device_category == "room air", 21, fio2_set)) |> 
   
   # erroneous set volumes are in places where they shouldn't be for PS and trach_dome
   mutate(
-    set_volume = fifelse(
+    tidal_volume_set = fifelse(
       (
         mode_category == "pressure support/cpap" &    # needs to be PS/CPAP
-          !is.na(pressure_support)                    # needs to have a PS level
+          !is.na(pressure_support_set)                    # needs to have a PS level
       ) |
         (
           is.na(mode_category) &                      # mode cat needs to be NA
@@ -761,7 +856,7 @@ df_resp_support  <- clif_resp_support |>
             str_detect(device_name, "trach")          # only when trach stuff
         ),
       NA_integer_,
-      set_volume),
+      tidal_volume_set),
     
     
   ) |>
@@ -779,8 +874,8 @@ df_resp_support  <- clif_resp_support |>
   arrange(encounter_id, recorded_dttm) |> 
   
   # took trach out of this so we don't fill back up 3/2024
-  fill(c(fio2, peep, set_volume, pressure_support, set_resp_rate,
-         exhaled_volume, pressure_inspiratory,  minute_vent, 
+  fill(c(fio2_set, peep_set, tidal_volume_set, pressure_support_set, resp_rate_set,
+         tidal_volume_obs, peak_inspiratory_pressure_obs,  minute_vent_obs, 
          hospital_id, location_name, location_category, in_dttm, out_dttm
   ), .direction = "downup"
   ) |>
@@ -804,18 +899,18 @@ df_resp_support  <- clif_resp_support |>
     mode_cat_id,
     device_id,
     device_cat_id,
-    fio2,
-    peep,
+    fio2_set,
+    peep_set,
     tracheostomy,
-    set_volume,
-    pressure_support,
-    set_resp_rate,
-    exhaled_volume,
+    tidal_volume_set,
+    pressure_support_set,
+    resp_rate_set,
+    tidal_volume_obs,
     # pressure_meanairway,
-    pressure_inspiratory,
-    pressure_plateau,
+    peak_inspiratory_pressure_obs,
+    plateau_pressure_obs,
     # obs_resp_rate,
-    minute_vent,
+    minute_vent_obs,
     hospital_id,
     location_name,
     location_category,
@@ -832,6 +927,7 @@ ni_toc()
 
 
 ```{r}
+
 ### remaining issues
 # [ ]  Issue with what to do when there are PS numbers with Trach Dome... should we show it as PS or leave blank
 
@@ -846,21 +942,24 @@ df_resp_support |> glimpse()
 
 ## this is just a stopping point so you can come back and work below 
 ## just run things before "Cleaning Data" and you can start below if its been saved once!
-write_fst(df_resp_support, "clean_db/df_resp_support.fst")
+write_parquet(df_resp_support, "clean_db/df_resp_support.parquet")
 
 
 ```
 
 
 ## Vitals / ibw / labs
+
 ```{r}
+
+
 ######################
 ##~~ clean vitals and get ibw
 ######################
 
 # quickly get back to things without doing the above
 if(!exists("df_resp_support")){
-  df_resp_support <- read_fst("clean_db/df_resp_support.fst")
+  df_resp_support <- read_parquet("clean_db/df_resp_support.parquet")
 }
 
 ##~~~~~~~~~~~~~
@@ -896,7 +995,8 @@ df_spo2 <- clif_vitals |>
 ##~~~~~~~~~~~~~
 
 df_pao2 <-  clif_labs |> 
-  
+    filter(lab_category %in% c("pao2",
+                             "sao2")) |> 
   select(encounter_id, recorded_dttm = lab_result_dttm, lab_category, lab_value) |>
 
   # getting pao2 / sao2
@@ -928,7 +1028,7 @@ df_pao2 <-  clif_labs |>
 df_ibw <- clif_vitals |> 
   
   # getting height and spo2
-  filter(vital_category == "height_inch") |> 
+  filter(vital_category == "height_inches") |> 
   
   # making those columns
   pivot_wider(
@@ -941,7 +1041,7 @@ df_ibw <- clif_vitals |>
   group_by(encounter_id) |> 
   
   # taking the first height DAY and ENCOUNTER
-  summarize(height_inch = ffirst(height_inch, na.rm = TRUE)) |> 
+  summarise(height_inches = ffirst(height_inches, na.rm = TRUE)) |> 
   ungroup() |> 
   
   # get biological sex
@@ -950,14 +1050,14 @@ df_ibw <- clif_vitals |>
             ) |> 
   
   # Calculate ibw for males
-  mutate(ibw = fifelse(sex == "male" & height_inch > 56, 50 + (2.3 * (height_inch - 60)), NA_real_)) |>  # 1st % of male = 60 inches
+  mutate(ibw = fifelse(sex == "male" & height_inches > 56, 50 + (2.3 * (height_inches - 60)), NA_real_)) |>  # 1st % of male = 60 inches
   
   # Calculate ibw for females
-  mutate(ibw = fifelse(sex == "female" & height_inch > 56, 45.5 + (2.3 * (height_inch - 60)), ibw)) |>  # 1st % of female = 56 inches
+  mutate(ibw = fifelse(sex == "female" & height_inches > 56, 45.5 + (2.3 * (height_inches - 60)), ibw)) |>  # 1st % of female = 56 inches
   
   # Remove records with height less than 40
   # This also removes those without a height for the whole admission, which is ok... can't do LTVV without height known
-  filter(height_inch >= 40) |>  # assumming these are kiddos and/or amputees which means IBW will be inaccurate
+  filter(height_inches >= 40) |>  # assumming these are kiddos and/or amputees which means IBW will be inaccurate
   group_by(encounter_id) |> 
   
   # using first ibw for the encounter
@@ -971,7 +1071,9 @@ df_ibw <- clif_vitals |>
 
 ```
 
+
 ## Trach Variation
+
 ```{r}
 
    # getting trach hospital (first one with trach == 1)
@@ -1053,6 +1155,7 @@ df_trach_variation |> glimpse()
   
 ```
 
+
 ## CLIF hourly level data
 
 ```{r}
@@ -1113,6 +1216,7 @@ df_hourly_resp_support2 <- df_hourly_resp_support1 |>
       NA_real_
     ),
     
+    # we could also drop these patients if we wanted to 
     # change those trach'd on day1 without vent beforehand to enc_sequence 1
     vent_episode_id = fifelse(
       tracheostomy == 1 & vent_episode_id == 0,
@@ -1125,15 +1229,34 @@ df_hourly_resp_support2 <- df_hourly_resp_support1 |>
   group_by(encounter_id, vent_episode_id) |> 
   mutate(vent_episode_hour_seq = fcumsum(
     recorded_dttm_hour_end != flag(recorded_dttm_hour_end, fill = TRUE))
-  ) |> 
-  
+  ) |>
   # fix those not vent back to NA
   mutate(vent_episode_hour_seq = fifelse(is.na(vent_episode_id), NA_real_, vent_episode_hour_seq)) |> 
   
+  
   # get max hours per vent sequence... want to drop those <=24
   mutate(vent_episode_duration_hours = fmax(vent_episode_hour_seq, na.rm = TRUE)) |>
-
+  
   ungroup() |> 
+  
+  # getting vent hour per sequence per hospital
+  #   there are times when that episode crosses hospitals
+  #   for hospital summary we need duration split up by hospital
+  group_by(encounter_id, vent_episode_id, hospital_id) |> 
+  mutate(vent_episode_hospital_hour_seq = fcumsum(
+    recorded_dttm_hour_end != flag(recorded_dttm_hour_end, fill = TRUE))
+  ) |> 
+  
+  
+  # fix those not vent back to NA
+  mutate(vent_episode_hospital_hour_seq = fifelse(is.na(vent_episode_id), NA_real_, vent_episode_hospital_hour_seq)) |> 
+  
+  
+  # get max hours per vent sequence... want to drop those <=24
+  mutate(vent_episode_hospital_duration_hours = fmax(vent_episode_hospital_hour_seq, na.rm = TRUE)) |>
+  
+  ungroup() |> 
+  
 
   # final variables
   select(
@@ -1144,28 +1267,30 @@ df_hourly_resp_support2 <- df_hourly_resp_support1 |>
   vent_episode_id,
   vent_episode_hour_seq,
   vent_episode_duration_hours,
+  vent_episode_hospital_hour_seq,
+  vent_episode_hospital_duration_hours,
   # recorded_dttm,
   device_category,
   device_name,
   mode_category,
   mode_name,
-  fio2,
+  fio2_set,
   recorded_month,
   recorded_year,
-  peep,
+  peep_set,
   tracheostomy,
-  set_volume,
+  tidal_volume_set,
   hospital_id,
   location_name,
   location_category,
-  pressure_support,
-  set_resp_rate,
-  exhaled_volume,
+  pressure_support_set,
+  resp_rate_set,
+  tidal_volume_obs,
   # pressure_meanairway,
-  pressure_inspiratory,
-  pressure_plateau,
+  peak_inspiratory_pressure_obs,
+  plateau_pressure_obs,
   # obs_resp_rate,
-  minute_vent,
+  minute_vent_obs,
   ) |>
   
   #~~ group by hour so that we can take the first time point to get our information
@@ -1193,7 +1318,8 @@ df_hourly_resp_support2 <- df_hourly_resp_support1 |>
   ungroup() |> 
   
   # merge trach variation data
-  left_join(df_trach_variation)
+  left_join(df_trach_variation) |> 
+  filter(!is.na(hospital_id))
 
 
 ni_toc()
@@ -1208,16 +1334,18 @@ df_hourly_resp_support <- df_hourly_resp_support2 |>
       vent_episode_id,
       vent_episode_hour_seq,
       vent_episode_duration_hours,
+      vent_episode_hospital_hour_seq,
+      vent_episode_hospital_duration_hours,
       device_category,
       device_name,
       mode_category,
       mode_name,
-      fio2,
+      fio2_set,
       recorded_month,
       recorded_year,
-      peep,
+      peep_set,
       tracheostomy,
-      set_volume,
+      tidal_volume_set,
       hospital_id,
       location_name,
       location_category,
@@ -1235,11 +1363,13 @@ df_hourly_resp_support <- df_hourly_resp_support2 |>
 # duplicate check
 # df_hourly_resp_support |> group_by(pick(colnames(df_hourly_resp_support))) |> filter(n() > 1) 
 
-write_fst(df_hourly_resp_support, "clean_db/df_hourly_resp_support.fst")
+write_parquet(df_hourly_resp_support, "clean_db/df_hourly_resp_support.parquet")
 
 
 rm(clif_vitals)
 gc()
+
+
 ```
 
 
@@ -1247,9 +1377,12 @@ gc()
 
 
 ## Fig 1 Mode Variation --> Frequency and Density of Vent Mode by hospitals
+
 ```{r}
+
+
 if(!exists("df_hourly_resp_support")){
-  df_hourly_resp_support <- read_fst("clean_db/df_hourly_resp_support.fst")
+  df_hourly_resp_support <- read_parquet("clean_db/df_hourly_resp_support.parquet")
 }
 
 
@@ -1271,7 +1404,7 @@ mode_hospital_summary_table <- df_hourly_resp_support |>
   arrange(-count) |> 
   ungroup()
 
-write_fst(mode_hospital_summary_table, paste0("tables/mode_hospital_summary_table",clif_institution,".fst"))
+write_parquet(mode_hospital_summary_table, paste0("tables/mode_hospital_summary_table",clif_institution,".parquet"))
 
 
 ##~~~~~~~~~~~~~
@@ -1298,12 +1431,14 @@ mode_hourly_resp_support_table <- mode_hourly_resp_support |>
 test_mode <- mode_hourly_resp_support_table |> 
   uncount(n) 
 
-write_fst(mode_hourly_resp_support_table, paste0("tables/mode_hourly_resp_support_table_",clif_institution,".fst"))
+write_parquet(mode_hourly_resp_support_table, paste0("tables/mode_hourly_resp_support_table_",clif_institution,".parquet"))
 
 ```
 
 
 ```{r}
+
+
 # Nick will run the below on the table you saved with all data together
 # ... so no need to save the graph
 # Left the code  so you can explore your own data
@@ -1345,7 +1480,9 @@ ggplot(
 ```
 
 ## Fig 2 Trach Variation --> Estimated Day of ventilation of Trach placement by hospitals
+
 ```{r}
+
 # clean up trach days
  trach_variation <- df_hourly_resp_support |> 
   filter(!is.na(vent_days_before_trach)) |> 
@@ -1360,12 +1497,13 @@ trach_variation_table <- trach_variation |>
 test_trach <- trach_variation_table |> 
   uncount(n) 
 
-write_fst(trach_variation_table, paste0("tables/trach_variation_table_",clif_institution,".fst"))
+write_parquet(trach_variation_table, paste0("tables/trach_variation_table_",clif_institution,".parquet"))
 
 ```
 
 
 ```{r}
+
 # Nick will run the below on the table you saved with all data together
 # ... so no need to save the graph
 # Left the code  so you can explore your own data
@@ -1407,7 +1545,9 @@ ggplot(trach_variation, aes(x = trach_hospital_id, y = vent_days_before_trach, f
 
 
 ## Fig 3 Initial Set Volume / ibw Variation 
+
 ```{r}
+
 ltvv_variation <- df_hourly_resp_support |> 
   # keep only those on vent and exclude non-icu times
   filter(device_category == "vent" & location_category == "icu") |> 
@@ -1416,7 +1556,7 @@ ltvv_variation <- df_hourly_resp_support |>
   filter(vent_episode_duration_hours >= 24) |> 
   
   # getting Vt by ibw
-  mutate(vt_cckg = set_volume / ibw) |> 
+  mutate(vt_cckg = tidal_volume_set / ibw) |> 
   mutate(vt_bin = case_when(
     vt_cckg <  4            ~"< 4 cc/kg",
     vt_cckg <  5            ~"4-5 cc/kg",
@@ -1438,8 +1578,8 @@ ltvv_variation <- df_hourly_resp_support |>
                                            "11-12 cc/kg", ">= 12 cc/kg")))
   ) |> 
 
-  # remove those without set_volumes
-  filter(!is.na(set_volume)) |> glimpse() 
+  # remove those without tidal_volume_sets
+  filter(!is.na(tidal_volume_set)) |> glimpse() 
 
 
 ltvv_variation_table <- ltvv_variation |> 
@@ -1448,7 +1588,7 @@ ltvv_variation_table <- ltvv_variation |>
 test_ltvv <- ltvv_variation_table |> 
   uncount(n) 
 
-write_fst(ltvv_variation_table, paste0("tables/ltvv_variation_table_",clif_institution,".fst"))
+write_parquet(ltvv_variation_table, paste0("tables/ltvv_variation_table_",clif_institution,".parquet"))
 ```
 
 
@@ -1475,6 +1615,7 @@ icu_hosp_ranks_8cc <- ltvv_variation |>
 
 
 ltvv_variation |> 
+  filter(hospital_id %in% icu_hosp_ranks_8cc) |> 
   mutate(hospital_id = factor(hospital_id, levels = rev(icu_hosp_ranks_8cc))) |> 
   ggplot(aes(y = hospital_id, fill = vt_bin )) + 
   geom_bar(position = "fill") + 
@@ -1491,6 +1632,7 @@ ggsave("figures/variation_in_vent_under_8cc_sort.pdf")
 
 
 ## Table 1 CLIF patient characteristics
+
 ```{r}
 
 
@@ -1515,52 +1657,115 @@ clif_mean_r = function(v)
 
 
 clif_demographics_table_start <- df_hourly_resp_support |> 
-  select(encounter_id, tracheostomy, hospital_id, vent_episode_duration_hours) |> 
+  select(encounter_id, tracheostomy, hospital_id, vent_episode_id, vent_episode_hospital_duration_hours) |> 
+  
+  # taking the first round of MV only
+  filter((vent_episode_id == 1)) |> 
+  select(-vent_episode_id) |> 
   distinct() |> 
+  
   # bring in demographics
   left_join(clif_demographics_combined) |> 
   filter(!is.na(age_at_admission)) |> 
-  filter(sex != "unknown")  |> 
+  filter(!is.na(hospital_id)) |> 
+  # fix forward slashes in hospital
+  mutate(hospital_id = str_replace(hospital_id, "/", " ")) |> 
+  filter(sex %in% c("male", "female"))  |> 
+  rename(age = age_at_admission) |> 
   mutate(race = fifelse(race == "unknown", "other", race)) |> 
-  mutate(death = ifelse(disposition %in% c("expired", "hospice"), 1, 0)) 
-
-table_summary <- clif_demographics_table_start |> 
-  group_by(hospital_id) |> 
-  summarise(N = n(), 
-            Age               = clif_mean_r(age_at_admission),
-            "Sex, female"     = clif_counts(sex == "female"),
-            Race              = "",
-            Black             = paste0("  ", clif_counts(race == "black or african-american")),
-            White             = paste0("  ", clif_counts(race == "white")),
-            Asian             = paste0("  ", clif_counts(race == "asian")),
-            Other             = paste0("  ", clif_counts(!race %in% c("black or african-american", "white", "asian"))),
-            "Ethnicity, Hispanic/Latino"   = clif_counts(ethnicity == "hispanic/latino"),
-            
-            "Ventilator Days" = clif_med(vent_episode_duration_hours/24),
-            "Mortality"       = clif_counts(death)
+  mutate(death = as.integer(grepl("dead|expired|death|died", disposition_category, ignore.case = TRUE))) |> 
+  mutate(
+    
+    # fixing up race
+    race_f = 
+      fcase(
+        grepl("black|african[-]american", race, ignore.case = TRUE)   , "Black",
+        grepl("white|caucasian", race, ignore.case = TRUE)            , "White",
+        grepl("asian", race, ignore.case = TRUE)                      , "Asian",
+        default                                                       = "Other"
+      ),
+    
+    # fixing up ethnicity
+    ethnicity_f = 
+      fcase(
+        grepl("(non|not)[-\\s]*(hispanic|latino|latinx|hisp)", ethnicity, ignore.case = TRUE), "Non Hispanic",
+        default = "Hispanic"
+      )
   ) |> 
-  mutate(hospital_id = str_to_title(hospital_id)) |> 
-  rename(Hospital = hospital_id)
+  
+  # getting max trach for encounter
+  group_by(encounter_id) |> 
+  mutate(tracheostomy = fmax(tracheostomy, na.rm = TRUE)) |> 
+  mutate(tracheostomy = fifelse(tracheostomy == 1, 1, 0, 0)) |> 
+  ungroup() |> 
+  distinct() |> 
+  mutate(across(where(is.character), str_to_title)) |> 
+  mutate(across(where(is.character), as.factor))
+
+hospitals <- clif_demographics_table_start |> select(hospital_id) |> distinct() |> pull()
+
+for (hosp in hospitals) {
+  clif_demographics_table_start_hosp <- clif_demographics_table_start |> filter(hospital_id == hosp)
+  # HTML content (make sure your actual HTML string is correctly input here)
+  html_content <- table1(~ age + sex + race + ethnicity + death + tracheostomy + vent_episode_hospital_duration_hours, data = clif_demographics_table_start_hosp)
+  
+  # Use rvest to read the HTML table
+  table <- read_html(html_content) %>%
+    html_table(fill = TRUE)
+  
+  # The first element of the list should be your table
+  df <- table[[1]]
+  
+  # Rename 'Overall(N=14598)' to 'fabc(N=14598)' using the site variable
+  names(df) <- gsub("Overall\\(N=(\\d+)\\)", paste0(hosp, ' ', "(N=\\1)"), names(df))
+  write.csv(df, paste0("tables/table1_", hosp, '.csv'), row.names = FALSE)
+  
+}
+
+# 
+# 
+# table_summary <- clif_demographics_table_start |> 
+#   group_by(hospital_id) |> 
+#   summarise(N = n(), 
+#             Age               = clif_mean_r(age_at_admission),
+#             "Sex, female"     = clif_counts(sex == "female"),
+#             Race              = "",
+#             Black             = paste0("  ", clif_counts(race == "black or african-american")),
+#             White             = paste0("  ", clif_counts(race == "white")),
+#             Asian             = paste0("  ", clif_counts(race == "asian")),
+#             Other             = paste0("  ", clif_counts(!race %in% c("black or african-american", "white", "asian"))),
+#             "Ethnicity, Hispanic"   = clif_counts(ethnicity == "hispanic"),
+#             
+#             "Ventilator Days" = clif_med(vent_episode_hospital_duration_hours/24),
+#             "Mortality"       = clif_counts(death)
+#   ) |> 
+#   mutate(hospital_id = str_to_title(hospital_id)) |> 
+#   rename(Hospital = hospital_id)
+# 
+# 
+# characteristics <- colnames(table_summary)
+# # table_summary <- as.data.frame(t(table_summary))
+# # characteristics
+# 
+# # leaving it without transposing it yet
+# table_summary
+# write_parquet(table_summary, paste0("tables/hospital_table_summary_",clif_institution,".parquet"))
 
 
-characteristics <- colnames(table_summary)
-# table_summary <- as.data.frame(t(table_summary))
-# characteristics
-
-# leaving it without transposing it yet
-table_summary
-write_fst(table_summary, paste0("tables/hospital_table_summary_",clif_institution,".fst"))
 ```
 
 
 ## Men vs Women Tidal Volume Ventilation
+
 ```{r}
+
 ltvv_female <- ltvv_variation |> 
   left_join(clif_demographics_combined |> select(sex, encounter_id)) |> 
   filter(!sex == "Unknown") 
 
   
 ltvv_variation |> 
+  filter(hospital_id %in% icu_hosp_ranks_8cc) |> 
   mutate(hospital_id = factor(hospital_id, levels = rev(icu_hosp_ranks_8cc), labels = rev(str_to_title(icu_hosp_ranks_8cc)))) |> 
   mutate(sex = factor(sex,
                       levels = c("male", "female"),
@@ -1596,6 +1801,990 @@ theme(
 
 ```
 
+
+# Laps2 Score
+
+
+## encounter data
+
+```{r}
+
+clif_adt_hospital <-  clif_adt |>
+  mutate(location_category = factor(location_category,
+                                    levels = (c("icu", "floor", "ed", "or", "l&d", "ltach", "imaging", "other")),
+                                    ordered = TRUE)) |> 
+  group_by(encounter_id) |> 
+  arrange(encounter_id, location_category, in_dttm) |> 
+  slice_head(n=1) |> 
+  ungroup() |> 
+  select(encounter_id,
+         hospital = hospital_id)
+
+
+clif_adt_admit <-  clif_adt |>
+  group_by(encounter_id) |> 
+  arrange(encounter_id, in_dttm) |> 
+  slice_head(n=1) |> 
+  ungroup() |> 
+  select(encounter_id,
+         first_location_category = location_category)
+  
+
+# fixing clif_labs to recorded_dttm
+if ("lab_result_dttm" %in% colnames(clif_labs)) {
+  clif_labs <- clif_labs |> rename(recorded_dttm = lab_result_dttm)
+}
+
+df_encounter_laps2_temp1 <- clif_limited_identifiers |> 
+  left_join(clif_encounter_demographics_dispo) |> 
+  left_join(clif_patient_demographics) |> 
+  left_join(clif_adt_hospital) |> 
+  left_join(clif_adt_admit) |> 
+  
+  # make dead/hospice column
+  mutate(
+    death_or_hospice_01 = fcase(
+      disposition_category %in% 
+        c("hospice", "dead", "expired", "died")       , 1,
+      default                                         = 0
+    ),
+    
+    death_or_hospice_01       = as.factor(death_or_hospice_01),
+    
+    # make 24 hours after admission variable (to collect data from first 24 hours)
+    dt_24hours_after_admit    = admission_dttm + hours(24),
+    
+    # ED binary variable
+    ed_admit_01               = fifelse(str_detect(first_location_category, "ed"), 1, 0, 0),
+          # I think we used categorical in Rachel Kohn paper... Pat uses ED y/n
+          # admission source OR you can use ED variable
+    # Admit source variable (use one or the other)
+    # admission_category      = as.factor(admission_category),  don't have this yet
+    
+    # sex
+    female_01                 = fifelse(str_detect(sex, "female"), 1, 0, 0),
+    
+  )
+
+
+```
+
+## prelaps
+
+```{r}
+
+############
+# Pre-Laps... want the most recent within 24 hours of admission
+############
+df_pre_laps2_prep1 <- 
+  df_encounter_laps2_temp1 |> 
+  left_join(clif_labs |> 
+              filter(lab_category %in% c("anion_gap",
+                                         "carbon_dioxide", # FROM BMP
+                                         "bun",
+                                         "creatinine",
+                                         "sodium")),
+            
+            # join only if between the first 24 hours
+            by = join_by(encounter_id, 
+                         dt_24hours_after_admit >= recorded_dttm) 
+  ) |> 
+  # Min/Max
+  #     bun            max
+  #     creatinine     min
+  #     bun/cr         max
+  #     bun/cr         most recent (prelaps)
+  #     anion_gap      max
+  #     carbon_dioxide min
+  #     ag/bicarb      most recent (prelaps)
+  #     sodium         min
+  #     sodium         most recent (prelaps)
+       
+  group_by(encounter_id, recorded_dttm, lab_category) |> 
+  # using obs lets you get away with duplicates when going wider and can fix later!
+  mutate(obs = row_number()) |> 
+  ungroup() |> 
+  pivot_wider(
+    id_cols = c(encounter_id, recorded_dttm, obs),
+    names_from = lab_category,
+    values_from = lab_value,
+    # names_prefix = "lab_wide_",
+    # values_fill = NA
+  ) |>
+  
+  # Quick min/max for duplicates at the SAME time
+  select(-obs) |> 
+  distinct() 
+
+# find the duplicates by recorded_dttm
+df_pre_laps2_prep2 <- df_pre_laps2_prep1 |> 
+  arrange(encounter_id, recorded_dttm) |> 
+  group_by(encounter_id, recorded_dttm) |>
+  # mutate(n = n()) |> 
+  # filter(n > 1) |> 
+  summarise(
+    bun               = fmax(bun, na.rm = TRUE),
+    creatinine        = fmin(creatinine, na.rm = TRUE),
+    carbon_dioxide    = fmin(carbon_dioxide, na.rm = TRUE),
+    anion_gap         = fmax(anion_gap, na.rm = TRUE),
+    sodium            = fmin(sodium, na.rm = TRUE),
+
+    .groups = "drop"
+  ) |> 
+  
+  # replace inf with NAs
+  mutate(across(where(is.numeric) & !c(encounter_id), ~ na_if(.x, is.infinite(.x)))) |> 
+  
+  # get rid of duplicate rows
+  distinct() |> 
+
+# df_pre_laps2_prep2 <- df_pre_laps2_prep1 |> 
+#   anti_join(df_pre_laps2_duplicates |> 
+#               select(encounter_id, recorded_dttm),
+#             join_by(encounter_id, recorded_dttm)) |> 
+#   bind_rows(df_pre_laps2_duplicates) |> 
+  
+  # order appropriately for when getting last labs for "most recent"
+  arrange(encounter_id, recorded_dttm) |> 
+  
+  # carry forward
+  group_by(encounter_id) |> 
+  
+  # fill in ... its only the first 24 hours so its ok
+  fill(c(bun,
+         creatinine,
+         carbon_dioxide,
+         anion_gap,
+         sodium), 
+       .direction = "downup") |>
+  
+  # ? time shift if needed
+  
+  # get the most recent lab (aka last) based on recorded_dttm
+    mutate(
+      bun_recent                = flast(bun),
+      creatinine_recent         = flast(creatinine),
+      carbon_dioxide_recent     = flast(carbon_dioxide),
+      anion_gap_recent          = flast(anion_gap),
+      sodium_recent             = flast(sodium)
+           ) |> 
+  ungroup() |> 
+  select(encounter_id, ends_with("recent")) |> 
+
+  # final pre-laps labs needed
+  mutate(
+    # make ratios
+    sodium              = sodium_recent,
+    bun_cr_ratio        = bun_recent/creatinine_recent,
+    ag_hco3_ratio       = (anion_gap_recent/carbon_dioxide_recent)*1000
+  ) |> 
+  select(-ends_with("recent")) |> 
+  
+  # replace inf with NAs (sometimes it happens when divided by zero)
+  mutate(across(where(is.numeric) & !c(encounter_id), ~ na_if(.x, is.infinite(.x)))) |> 
+  
+  distinct()
+  
+
+
+
+# replacing all the admission values that are missing with normal values
+        # replace BUNCREAT_RECENT_24=8 if BUNCREAT_RECENT_24==. // 4724
+        # replace NA_RECENT_24=135 if NA_RECENT_24==. // 4270
+        # replace AGHCO3_RECENT_24=200 if AGHCO3_RECENT_24==. // 5103
+        
+ df_pre_laps_merging <- df_pre_laps2_prep2 |> 
+   left_join(
+     df_encounter_laps2_temp1 |> 
+       select(
+         encounter_id,
+         admission_dttm,
+         age = age_at_admission,
+         female_01,
+         ed_admit_01,
+         # admission_category,
+         death_or_hospice_01
+       ) |> 
+       distinct(),
+     join_by(encounter_id)
+   ) |> 
+   mutate(
+    age_cat = case_when(
+      age >= 85 ~ 5,
+      age >= 75 ~ 4,
+      age >= 65 ~ 3,
+      age >= 40 ~ 2,
+      TRUE ~ 1
+    )
+  ) |> 
+   mutate(
+      # impute to normal (8)
+    bun_cr_ratio = fifelse(is.na(bun_cr_ratio), 8, bun_cr_ratio),
+     
+    buncreat_cat = case_when(
+      bun_cr_ratio        >= 24 ~ 4,
+      bun_cr_ratio        >= 16 ~ 3,
+      bun_cr_ratio        < 8   ~ 2,
+      TRUE                      ~ 1
+    )
+  ) |> 
+     mutate(
+      # impute to normal (135)
+    sodium = fifelse(is.na(sodium), 135, sodium),
+    na_cat = case_when(
+      sodium            >= 155  ~ 7,
+      sodium            >= 149  ~ 6,
+      sodium            >= 146  ~ 5,
+      sodium            >= 132  ~ 4,
+      sodium            >= 129  ~ 3,
+      sodium            < 129   ~ 2,
+      TRUE                      ~ 1
+    )
+  ) |> 
+     mutate(
+      # impute to normal (200)
+    ag_hco3_ratio = fifelse(is.na(ag_hco3_ratio), 200, ag_hco3_ratio),
+    aghco3_cat = case_when(
+      ag_hco3_ratio        >= 600  ~ 4,
+      ag_hco3_ratio        >= 400  ~ 3,
+      ag_hco3_ratio        < 200   ~ 2,
+      TRUE                         ~ 1,
+    )
+  )
+ 
+ # logistic regression to obtain p(death/hospice)
+ lr_model <-
+  glm(
+    death_or_hospice_01 ~
+      age +
+      female_01 +
+      ed_admit_01 +
+      bun_cr_ratio +
+      sodium +
+      ag_hco3_ratio,
+    family = "binomial",
+    data   = df_pre_laps_merging
+  )
+
+tidy(lr_model)
+pR2(lr_model)["McFadden"]
+
+df_pre_laps_final  <- df_pre_laps_merging |> 
+  mutate(p_death = predict(lr_model, df_pre_laps_merging, type = "response")) |> 
+  mutate(
+    high_risk = case_when(
+      p_death >= 0.06 ~ 1,
+      TRUE ~ 0
+    )) %>%
+  select(encounter_id, p_death, high_risk)
+
+```
+
+
+The above has like 58% high risk... that seems too high
+See testing below but ultimately I think its ok to use the predictions as above and not the published ones below.  
+R2 is 17 (using GLM) vs 11 (using numbers from Escobar study) when doing glm(death ~ p_death) in isolation.  Despite having a high number of high risk (58% with glm vs 10% with escobar numbers), i think it will work out ok
+
+
+## laps2 labs ALL
+
+```{r}
+##~~~~~~~~~~~~~~~~~~~~~
+# LAPS2 time
+##~~~~~~~~~~~~~~~~~~~~~
+ 
+df_laps2_prep1 <- 
+  df_encounter_laps2_temp1 |> 
+  select(encounter_id, admission_dttm, discharge_dttm) |> 
+  distinct() |> 
+  # slice_head(n=1000) |> 
+  left_join(clif_labs |> 
+              filter(lab_category %in% c("albumin",
+                                     "anion_gap",
+                                     "bilirubin_total",
+                                     "bun",
+                                     "carbon_dioxide",
+                                     "creatinine",
+                                     "glucose_serum",
+                                     "hematocrit",
+                                     "hemoglobin",
+                                     "lactic_acid",
+                                     "paco2",
+                                     "pao2",
+                                     "ph_arterial",
+                                     "platelet_count",
+                                     "sao2",
+                                     "sodium",
+                                     "troponin",
+                                     "wbc")) |> 
+              select(-lab_order_dttm),
+            
+            # join only if between the first 24 hours
+            by = join_by(encounter_id)) |> 
+  # making all hemoglobin into hematocrits
+  mutate(lab_value = fifelse(lab_category == "hemoglobin", lab_value*3, lab_value)) |> 
+  mutate(lab_category = fifelse(lab_category == "hemoglobin", "hematocrit", lab_category)) |> 
+  
+    # using obs lets you get away with duplicates when going wider and can fix later!
+  group_by(encounter_id, recorded_dttm, lab_category) |> 
+  mutate(obs = row_number()) |> 
+  ungroup() |> 
+  
+  # pivot wider to get columns
+  pivot_wider(
+    id_cols = c(encounter_id, recorded_dttm, obs),
+    names_from = lab_category,
+    values_from = lab_value,
+    # names_prefix = "lab_wide_",
+    # values_fill = NA
+  ) |>
+  
+  # Quick min/max for duplicates at the SAME time
+  select(-obs) |> 
+  mutate(lab_date = date(recorded_dttm)) |> 
+  distinct() 
+
+ni_tic()
+# find the duplicates by day
+df_laps2_prep2 <- df_laps2_prep1 |>
+  # arrange(encounter_id, recorded_dttm) |>
+  group_by(encounter_id, lab_date) |>
+  # mutate(n = n()) |>
+  # filter(n > 1) |>
+  summarise(
+    albumin             = fmin(albumin, na.rm = TRUE),
+    anion_gap           = fmax(anion_gap, na.rm = TRUE),
+    bilirubin_total     = fmax(bilirubin_total, na.rm = TRUE),
+    bun                 = fmax(bun, na.rm = TRUE),
+    carbon_dioxide      = fmin(carbon_dioxide, na.rm = TRUE),
+    creatinine          = fmax(creatinine, na.rm = TRUE),
+    glucose_serum       = fmin(glucose_serum, na.rm = TRUE),
+    hematocrit          = fmax(hematocrit, na.rm = TRUE),
+    lactic_acid         = fmax(lactic_acid, na.rm = TRUE),
+    paco2               = fmax(paco2, na.rm = TRUE),
+    pao2                = fmax(pao2, na.rm = TRUE),
+    ph_arterial         = fmin(ph_arterial, na.rm = TRUE),
+    platelet_count      = fmin(platelet_count, na.rm = TRUE),
+    sao2                = fmin(sao2, na.rm = TRUE),
+    sodium              = fmin(sodium, na.rm = TRUE),
+    troponin            = fmax(troponin, na.rm = TRUE),
+    wbc                 = fmin(wbc, na.rm = TRUE
+    ), 
+
+    .groups = "drop"
+  ) |> 
+  
+    # bun_cr_ratio
+  mutate(
+    bun_cr_ratio = bun / creatinine
+  ) |> 
+  
+    mutate(across(where(is.numeric) & !c(encounter_id), ~ na_if(.x, is.infinite(.x)))) |> 
+  # get rid of duplicate rows
+  distinct() 
+
+
+
+
+# |> 
+#   group_by(encounter_id) |> 
+#   # carryforward after prelaps imputation
+#     fill(c(
+#       albumin,
+#       anion_gap,
+#       bilirubin_total,
+#       bun,
+#       carbon_dioxide,
+#       creatinine,
+#       glucose,
+#       hematocrit,
+#       lactic_acid,
+#       paco2,
+#       pao2,
+#       ph_arterial,
+#       platelet_count,
+#       sao2,
+#       sodium,
+#       troponin,
+#       wbc,
+#       ), 
+#       .direction = "down") |>
+  
+  ni_toc()
+
+
+            
+```
+
+## Labs day one
+
+```{r}
+df_laps2_dayone_prep1 <- 
+  df_encounter_laps2_temp1 |> 
+  select(encounter_id, admission_dttm, discharge_dttm, dt_24hours_after_admit) |> 
+  distinct() |> 
+  left_join(clif_labs |> 
+              filter(lab_category %in% c("albumin",
+                                     "anion_gap",
+                                     "bilirubin_total",
+                                     "bun",
+                                     "carbon_dioxide",
+                                     "creatinine",
+                                     "glucose_serum",
+                                     "hematocrit",
+                                     "hemoglobin",
+                                     "lactic_acid",
+                                     "paco2",
+                                     "pao2",
+                                     "ph_arterial",
+                                     "platelet_count",
+                                     "sao2",
+                                     "sodium",
+                                     "troponin",
+                                     "wbc")) |>            
+              select(-lab_order_dttm),
+            
+            # join only if between the first 24 hours
+            by = join_by(encounter_id, 
+                         dt_24hours_after_admit >= recorded_dttm)
+  ) |> 
+
+  # making all hemoglobin into hematocrits
+  mutate(lab_value = fifelse(lab_category == "hemoglobin", lab_value*3, lab_value)) |> 
+  mutate(lab_category = fifelse(lab_category == "hemoglobin", "hematocrit", lab_category)) |> 
+  
+  group_by(encounter_id, recorded_dttm, lab_category) |> 
+  # using obs lets you get away with duplicates when going wider and can fix later!
+  mutate(obs = row_number()) |> 
+  ungroup() |> 
+  
+  # pivot wider to get columns
+  pivot_wider(
+    id_cols = c(encounter_id, recorded_dttm, obs, admission_dttm),
+    names_from = lab_category,
+    values_from = lab_value,
+    # names_prefix = "lab_wide_",
+    # values_fill = NA
+  ) |>
+  
+  # Quick min/max for duplicates at the SAME time
+  select(-obs) |> 
+  distinct() 
+
+# get min/max
+df_laps2_dayone_prep2 <- df_laps2_dayone_prep1 |>
+  arrange(encounter_id, recorded_dttm) |> 
+  
+  # filter out those without a recorded_dttm so we don't add a date later
+  filter(!is.na(recorded_dttm)) |> 
+  # if we make "lab_date" the encounter date... then we are switching all labs within 24hr of admission to the "day 1" in a sneaky fashion
+  mutate(lab_date = date(admission_dttm)) |> # make it all the same day 1
+  group_by(encounter_id, lab_date) |>
+  # mutate(n = n()) |>
+  # filter(n > 1) |>
+  summarise(
+    albumin             = fmin(albumin, na.rm = TRUE),
+    anion_gap           = fmax(anion_gap, na.rm = TRUE),
+    bilirubin_total     = fmax(bilirubin_total, na.rm = TRUE),
+    bun                 = fmax(bun, na.rm = TRUE),
+    carbon_dioxide      = fmin(carbon_dioxide, na.rm = TRUE),
+    creatinine          = fmax(creatinine, na.rm = TRUE),
+    glucose_serum       = fmin(glucose_serum, na.rm = TRUE),
+    hematocrit          = fmax(hematocrit, na.rm = TRUE),
+    lactic_acid         = fmax(lactic_acid, na.rm = TRUE),
+    paco2               = fmax(paco2, na.rm = TRUE),
+    pao2                = fmax(pao2, na.rm = TRUE),
+    ph_arterial         = fmin(ph_arterial, na.rm = TRUE),
+    platelet_count      = fmin(platelet_count, na.rm = TRUE),
+    sao2                = fmin(sao2, na.rm = TRUE),
+    sodium              = fmin(sodium, na.rm = TRUE),
+    troponin            = fmax(troponin, na.rm = TRUE),
+    wbc                 = fmin(wbc, na.rm = TRUE
+    ),
+
+    .groups = "drop"
+  ) |> 
+  
+    # bun_cr_ratio
+  mutate(
+    bun_cr_ratio = bun / creatinine
+  ) |> 
+  
+    # replace inf with NAs
+  mutate(across(where(is.numeric) & !c(encounter_id), ~ na_if(.x, is.infinite(.x)))) |> 
+
+    # get rid of duplicate rows
+  distinct() 
+
+
+
+# switch out the day 1 stuff 
+df_laps2_final <- df_laps2_prep2 |> anti_join(df_laps2_dayone_prep2 |> 
+                              select(encounter_id, lab_date)) |> 
+  bind_rows(df_laps2_dayone_prep2) |> 
+  arrange(encounter_id, lab_date) |> 
+  
+
+  # filter out NA for lab date
+  filter(!is.na(lab_date))
+
+  
+```
+
+
+## GCS
+
+
+```{r}
+
+
+
+df_gcs_merge_ready <- clif_gcs |>
+  mutate(vital_value = case_when(
+    gcs_total %in% c(14, 15)                ~ 1,
+    gcs_total %in% c(8, 9, 10, 11, 12, 13)  ~ 3,
+    gcs_total %in% c(2, 3, 4, 5, 6, 7)      ~ 4,
+    TRUE                                    ~ NA   # we account for this when doing the points later
+  )) |>
+  mutate(vital_category = "gcs") |> 
+  select(encounter_id,
+         vital_category,
+         recorded_dttm,
+         vital_value,
+         )
+
+
+df_vitals_gcs <- clif_vitals |>
+              filter(vital_category %in% c("temp_f",
+                                       "sbp",
+                                       "spo2",
+                                       "pulse",
+                                       "respiration")) |>
+              select(-meas_site_name) |> 
+              
+                          # get gcs in there now
+              bind_rows(df_gcs_merge_ready)
+
+
+```
+
+## vitals all
+
+```{r}
+
+df_laps2_vitals_prep1 <- 
+  df_encounter_laps2_temp1 |> 
+  select(encounter_id, admission_dttm, discharge_dttm) |>
+  distinct() |> 
+  left_join(df_vitals_gcs,
+            
+            # join by the encounter ID
+            by = join_by(encounter_id)) |> 
+  
+    group_by(encounter_id, recorded_dttm, vital_category) |> 
+  # using obs lets you get away with duplicates when going wider and can fix later!
+  mutate(obs = row_number()) |> 
+  ungroup() |> 
+  pivot_wider(
+    id_cols = c(encounter_id, recorded_dttm, obs),
+    names_from = vital_category,
+    values_from = vital_value,
+    # names_prefix = "vital_wide_",
+    # values_fill = NA
+  ) |>
+  
+  #fixing temp name
+  rename(temp = temp_f,
+         resp = respiration) |> 
+  
+  # Quick min/max for duplicates at the SAME time
+  select(-obs) |> 
+  distinct() 
+
+# find the duplicates by day
+df_laps2_vitals_prep2 <- df_laps2_vitals_prep1 |>
+  arrange(encounter_id, recorded_dttm) |>
+  mutate(vital_date = date(recorded_dttm)) |> 
+  group_by(encounter_id, vital_date) |>
+  # mutate(n = n()) |>
+  # filter(n > 1) |>
+  summarise(
+    temp                = fmin(temp, na.rm = TRUE),
+    sbp                 = fmin(sbp, na.rm = TRUE),
+    spo2                = fmin(spo2, na.rm = TRUE),
+    pulse               = fmax(pulse, na.rm = TRUE),
+    resp                = fmax(resp, na.rm = TRUE),
+    gcs                 = fmax(gcs, na.rm = TRUE),  # remember the groupings... higher is lower gcs
+    # shock_index         = fmax(shock_index, na.rm = TRUE),  # do this after
+
+    .groups = "drop"
+  ) |> 
+  mutate(
+    shock_index = pulse / sbp
+  ) |> 
+  # replace inf with NAs
+  mutate(across(where(is.numeric) & !c(encounter_id), ~ na_if(.x, is.infinite(.x)))) |> 
+
+  # get rid of duplicate rows
+  distinct() 
+
+
+
+
+```
+
+
+## vitals day one
+
+```{r}
+
+
+df_laps2_vitals_dayone_prep1 <- 
+  df_encounter_laps2_temp1 |> 
+  select(encounter_id, admission_dttm, discharge_dttm, dt_24hours_after_admit) |>
+  distinct() |> 
+  left_join(df_vitals_gcs,
+            
+            # join only if between the first 24 hours
+            by = join_by(encounter_id, 
+                         dt_24hours_after_admit >= recorded_dttm)
+  ) |> 
+  
+    group_by(encounter_id, recorded_dttm, vital_category) |> 
+  # using obs lets you get away with duplicates when going wider and can fix later!
+  mutate(obs = row_number()) |> 
+  ungroup() |> 
+  pivot_wider(
+    id_cols = c(encounter_id, recorded_dttm, obs, admission_dttm),
+    names_from = vital_category,
+    values_from = vital_value,
+    # names_prefix = "vital_wide_",
+    # values_fill = NA
+  ) |>
+    
+  #fixing temp name
+  rename(temp = temp_f,
+         resp = respiration) |> 
+  
+  
+  # Quick min/max for duplicates at the SAME time
+  select(-obs) |> 
+  
+
+  distinct() 
+
+# find the duplicates by day
+df_laps2_vitals_dayone_prep2 <- df_laps2_vitals_dayone_prep1 |>
+  arrange(encounter_id, recorded_dttm) |>
+  
+  # filter out those without a recorded_dttm so we don't add a date later
+  filter(!is.na(recorded_dttm)) |> 
+  
+  # if we make "lab_date" the encounter date... then we are switching all labs within 24hr of admission to the "day 1" in a sneaky fashion
+  #using encounter admit date to collect everything together
+  mutate(vital_date = date(admission_dttm)) |> 
+  group_by(encounter_id, vital_date) |>
+  # mutate(n = n()) |>
+  # filter(n > 1) |>
+  summarise(
+    temp                = fmin(temp, na.rm = TRUE),
+    sbp                 = fmin(sbp, na.rm = TRUE),
+    spo2                = fmin(spo2, na.rm = TRUE),
+    pulse               = fmax(pulse, na.rm = TRUE),
+    resp                = fmax(resp, na.rm = TRUE),
+    gcs                 = fmax(gcs, na.rm = TRUE),
+    # shock_index         = fmax(shock_index, na.rm = TRUE),  # do this after
+
+    .groups = "drop"
+  ) |> 
+  mutate(
+    shock_index         = pulse / sbp
+  ) |> 
+  
+  # replace inf with NAs
+  mutate(across(where(is.numeric) & !c(encounter_id), ~ na_if(.x, is.infinite(.x)))) |> 
+
+  # get rid of duplicate rows
+  distinct() 
+
+# switch out the day 1 stuff 
+df_laps2_vitals_final <- df_laps2_vitals_prep2 |> anti_join(df_laps2_vitals_dayone_prep2 |> 
+                              select(encounter_id, vital_date)) |> 
+  bind_rows(df_laps2_vitals_dayone_prep2) |> 
+  arrange(encounter_id, vital_date) |> 
+  
+  # drop rows with no recorded date
+  filter(!is.na(vital_date))
+
+
+
+```
+
+
+
+## Laps2 code
+
+```{r}
+
+df_laps_calc <- df_laps2_final |> 
+  # get same naming for date
+  rename(recorded_date = lab_date) |> 
+  full_join(df_laps2_vitals_final |> 
+              rename(recorded_date = vital_date),
+            join_by(encounter_id, recorded_date)
+            ) |> 
+  full_join(df_pre_laps_final)
+  
+df_laps2_scores <- df_laps_calc |> 
+  group_by(encounter_id, recorded_date) |> 
+  mutate(
+    laps2 = 0,
+    # lactic_acid and pH 
+    laps2 = fcase(
+      
+      # missing data
+      is.na(ph_arterial)  &                      is.na(lactic_acid) & high_risk == 0 , laps2 + 0,
+      is.na(ph_arterial)  &                      is.na(lactic_acid) & high_risk == 1 , laps2 + 15,
+      is.na(ph_arterial)  &                      lactic_acid < 2    & high_risk == 0 , laps2 + 0,
+      is.na(ph_arterial)  &                      lactic_acid < 2    & high_risk == 1 , laps2 + 12,
+      is.na(ph_arterial)  &     lactic_acid >= 2   & lactic_acid < 4    & high_risk == 0 , laps2 + 12,
+      is.na(ph_arterial)  &     lactic_acid >= 2   & lactic_acid < 4    & high_risk == 1 , laps2 + 15,
+      is.na(ph_arterial)  &                      lactic_acid >= 4   & high_risk == 0 , laps2 + 26,
+      is.na(ph_arterial)  &                      lactic_acid >= 4   & high_risk == 1 , laps2 + 30,
+      ph_arterial < 7.2   &                      is.na(lactic_acid) & high_risk == 0 , laps2 + 13,
+      ph_arterial < 7.2   &                      is.na(lactic_acid) & high_risk == 1 , laps2 + 19,
+      ph_arterial >= 7.2  & ph_arterial < 7.35 & is.na(lactic_acid) & high_risk == 0 , laps2 + 5,
+      ph_arterial >= 7.2  & ph_arterial < 7.35 & is.na(lactic_acid) & high_risk == 1 , laps2 + 15,
+      ph_arterial >= 7.35 & ph_arterial < 7.45 & is.na(lactic_acid) & high_risk == 0 , laps2 + 0,
+      ph_arterial >= 7.35 & ph_arterial < 7.45 & is.na(lactic_acid) & high_risk == 1 , laps2 + 12,
+      ph_arterial >= 7.45 &                      is.na(lactic_acid) & high_risk == 0 , laps2 + 12,
+      ph_arterial >= 7.45 &                      is.na(lactic_acid) & high_risk == 1 , laps2 + 15,
+
+      # complete data
+      ph_arterial < 7.2   &                      lactic_acid <  2                   , laps2 + 13,
+      ph_arterial < 7.2   &     lactic_acid >= 2   & lactic_acid <  4                   , laps2 + 19,
+      ph_arterial < 7.2   &                      lactic_acid >= 4                   , laps2 + 34,
+      ph_arterial >= 7.2  & ph_arterial < 7.35 & lactic_acid <  2                   , laps2 + 5,
+      ph_arterial >= 7.2  & ph_arterial < 7.35 & lactic_acid >= 2 & lactic_acid < 4     , laps2 + 15,
+      ph_arterial >= 7.2  & ph_arterial < 7.35 & lactic_acid >= 4                   , laps2 + 25,
+      ph_arterial >= 7.35 & ph_arterial < 7.45 & lactic_acid <  2                   , laps2 + 0,
+      ph_arterial >= 7.35 & ph_arterial < 7.45 & lactic_acid >= 2 & lactic_acid < 4     , laps2 + 12,
+      ph_arterial >= 7.35 & ph_arterial < 7.45 & lactic_acid >= 4                   , laps2 + 26,
+      ph_arterial >= 7.45 &                      lactic_acid <  2                   , laps2 + 12,
+      ph_arterial >= 7.45 &     lactic_acid >= 2 &   lactic_acid <  4                   , laps2 + 15,
+      ph_arterial >= 7.45 &                      lactic_acid >= 4                   , laps2 + 30,
+      default                                                                   = laps2
+      ),
+    
+    # Sodium
+    laps2 = fcase(
+      is.na(sodium)                                                             , laps2 + 0,
+      sodium <  129                                                             , laps2 + 14,
+      sodium >= 129 & sodium < 135                                              , laps2 + 7,
+      sodium >= 135 & sodium < 146                                              , laps2 + 0,
+      sodium >= 146                                                             , laps2 + 4,
+      default                                                                   = laps2
+    ),
+    
+    # Bilirubin
+    laps2 = fcase(
+      is.na(bilirubin_total)                                                    , laps2 + 0,
+      bilirubin_total <  2                                                      , laps2 + 0,
+      bilirubin_total >= 2 & bilirubin_total < 3                                , laps2 + 11,
+      bilirubin_total >= 3 & bilirubin_total < 5                                , laps2 + 18,
+      bilirubin_total >= 5 & bilirubin_total < 8                                , laps2 + 25,
+      bilirubin_total >= 8                                                      , laps2 + 41,
+      TRUE , laps2
+    ),
+    
+    # BUN
+    laps2 = fcase(
+      is.na(bun)                                                                , laps2 + 0,
+      bun < 18                                                                  , laps2 + 0,
+      bun >= 18 & bun < 20                                                      , laps2 + 11,
+      bun >= 20 & bun < 40                                                      , laps2 + 12,
+      bun >= 40 & bun < 80                                                      , laps2 + 20,
+      bun >= 80                                                                 , laps2 + 25,
+      default                                                                   = laps2
+    ),
+    
+    # Creatinine
+    laps2 = fcase(
+      is.na(creatinine)                                                         , laps2 + 0,
+      creatinine < 1                                                            , laps2 + 0,
+      creatinine >= 1 & creatinine < 2                                          , laps2 + 6,
+      creatinine >= 2 & creatinine < 4                                          , laps2 + 11,
+      creatinine >= 4                                                           , laps2 + 5,
+      default                                                                   = laps2
+    ),
+    
+    # BUN/Cr Ratio
+    laps2 = fcase(
+      is.na(bun_cr_ratio)                                                       , laps2 + 0,
+      bun_cr_ratio < 25                                                         , laps2 + 0,
+      bun_cr_ratio >= 25                                                        , laps2 + 10,
+      default                                                                   = laps2
+    ),
+    
+    # Albumin
+    laps2 = fcase(
+      is.na(albumin)                                                            , laps2 + 0,
+      albumin < 2                                                               , laps2 + 31,
+      albumin >= 2 & albumin < 2.5                                              , laps2 + 15,
+      albumin >= 2.5                                                            , laps2 + 0,
+      default                                                                   = laps2
+    ),
+    
+    # glucose_serum
+    laps2 = fcase(
+      is.na(glucose_serum)                                                            , laps2 + 0,
+      glucose_serum < 40                                                              , laps2 + 10,
+      glucose_serum >= 40 & glucose_serum < 60                                              , laps2 + 10,
+      glucose_serum >= 60 & glucose_serum < 200                                             , laps2 + 0,
+      glucose_serum >= 200                                                            , laps2 + 3,
+      default                                                                   = laps2
+    ),
+    
+    # Hematocrit (Hct)
+    laps2 = fcase(
+      is.na(hematocrit)                                                         , laps2 + 0,
+      hematocrit < 20                                                           , laps2 + 7,
+      hematocrit >= 20 & hematocrit < 40                                        , laps2 + 8,
+      hematocrit >= 40 & hematocrit < 50                                        , laps2 + 0,
+      hematocrit >= 50                                                          , laps2 + 3,
+      default                                                                   = laps2
+    ),
+    
+    # WBC
+    laps2 = fcase(
+      is.na(wbc) &                                               high_risk == 0 , laps2 + 0,
+      is.na(wbc) &                                               high_risk == 1 , laps2 + 32,
+      wbc < 5                                                                   , laps2 + 8,
+      wbc >= 5 & wbc < 13                                                       , laps2 + 0,
+      wbc >= 13                                                                 , laps2 + 11,
+      default                                                                   = laps2
+    ),
+    
+  # PaCO2
+    laps2 = fcase(
+      is.na(paco2)                                                              , laps2 + 0,
+      paco2 < 35                                                                , laps2 + 7,
+      paco2 >= 35 & paco2 < 45                                                  , laps2 + 0,
+      paco2 >= 45 & paco2 < 55                                                  , laps2 + 11,
+      paco2 >= 55 & paco2 < 65                                                  , laps2 + 13,
+      paco2 >= 65                                                               , laps2 + 12,
+      default                                                                   = laps2
+    ),
+  
+  # PaO2
+    laps2 = fcase(
+      is.na(pao2)                                                               , laps2 + 0,
+      pao2 < 50                                                                 , laps2 + 8,
+      pao2 >= 50 & pao2 < 120                                                   , laps2 + 0,
+      pao2 >= 120                                                               , laps2 + 12,
+      default                                                                   = laps2
+    ),
+  
+  # Troponin
+    laps2 = fcase(
+      is.na(troponin)  &                                       high_risk == 0 , laps2 + 0,
+      is.na(troponin)  &                                       high_risk == 1 , laps2 + 9,
+      troponin <  0.01                                                        , laps2 + 0,
+      troponin >= 0.01 & troponin < 0.2                                     , laps2 + 8,
+      troponin >= 0.2  & troponin < 1                                       , laps2 + 17,
+      troponin >= 1    & troponin < 3                                       , laps2 + 19,
+      troponin >= 3                                                           , laps2 + 25,
+      default                                                                   = laps2
+    ),
+  
+  # Temp
+    laps2 = fcase(
+      is.na(temp)                                                               , laps2 + 0,
+      temp < 96                                                                 , laps2 + 20,
+      temp >= 96    & temp < 100.5                                              , laps2 + 0,
+      temp >= 100.5                                                             , laps2 + 3,
+      default                                                                   = laps2
+    ),
+
+  # Pulse
+    laps2 = fcase(
+      is.na(pulse)                                                              , laps2 + 0,
+      pulse < 60                                                                , laps2 + 7,
+      pulse >= 60  & pulse < 110                                                , laps2 + 0,
+      pulse >= 110 & pulse < 140                                                , laps2 + 7,
+      pulse >= 140                                                              , laps2 + 10,
+      default                                                                   = laps2
+    ),
+  
+  # Resp
+    laps2 = fcase(
+      is.na(resp)                                                               , laps2 + 0,
+      resp < 20                                                                 , laps2 + 0,
+      resp >= 20 & resp < 30                                                    , laps2 + 11,
+      resp >= 30                                                                , laps2 + 21,
+      default                                                                   = laps2
+    ),
+    
+  # SBP
+    laps2 = fcase(
+      is.na(sbp)                                                                , laps2 + 0,
+      sbp < 75                                                                  , laps2 + 22,
+      sbp >= 75  & sbp < 90                                                     , laps2 + 13,
+      sbp >= 90  & sbp < 120                                                    , laps2 + 5,
+      sbp >= 120 & sbp < 140                                                    , laps2 + 0,
+      sbp >= 140 & sbp < 160                                                    , laps2 + 8,
+      sbp >= 160                                                                , laps2 + 14,
+      default                                                                   = laps2
+    ),
+  
+  # Shock
+    laps2 = fcase(
+      is.na(shock_index)                                                        , laps2 + 0,
+      shock_index < 0.65                                                        , laps2 + 0,
+      shock_index >= 0.65 & shock_index < 0.85                                  , laps2 + 8,
+      shock_index >= 0.85                                                       , laps2 + 17,
+      default                                                                   = laps2
+    ),
+  
+  # O2Sat
+    laps2 = fcase(
+      is.na(spo2) &                                              high_risk == 0 , laps2 + 0,
+      is.na(spo2) &                                              high_risk == 1 , laps2 + 22,
+      spo2 <  90                                                                , laps2 + 22,
+      spo2 >= 90  & spo2 < 94                                                   , laps2 + 12,
+      spo2 >  94                                                                , laps2 + 0,
+      default                                                                   = laps2
+    ),
+  
+  # Neuro (GCS)
+    laps2 = fcase(
+      is.na(gcs) &                                               high_risk == 0 , laps2 + 16,
+      is.na(gcs) &                                               high_risk == 1 , laps2 + 21,
+      gcs == 1                                                                  , laps2 + 0,
+      gcs == 2                                                                  , laps2 + 16,
+      gcs == 3                                                                  , laps2 + 21,
+      gcs == 4                                                                  , laps2 + 36,
+      default                                                                   = laps2
+    )
+  )
+
+  
+
+```
+
+## PF Ratio
+
+```{r}
+
+clif_pao2 <- import_df("clif_vitals") |> filter(vital_category == "pao2") 
+
+clif_fio2 <- clif_respiratory_support |> filter(!is.na(fio2_set)) |> select(encounter_id, recorded_dttm, fio2_set)
+
+```
+
+
+# Analysis
+
 ## analysis 1
 propensity score match M/F on LAPS2, age, pf ratio
 - need to decide when we prop match
@@ -1608,13 +2797,12 @@ add ht to regression
 use a for loop to see how this changes over time, run the regression on each MV day
 
 
-
-###### Not doing right now... maybe after ATS~~~~~~~~~~~~~~~~~~~
 ## Table 3 Predictors of Mode Variation / Trach Variation / LTVV Variation / Prone Variation
+
 ```{r}
 
+test
 
 
 ```
-
 
